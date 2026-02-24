@@ -10,7 +10,7 @@ Three subsystems for autonomous driving trajectory planning:
 | **BEV V2X Transformer** | `bev_v2x_transformer/` | Transformer-based BEV prediction → probability maps for future 3 timesteps |
 | **Dataset Convert** | `dataset_convert/` | INTERACTION/highD/inD → CommonRoad XML conversion |
 
-**Data flow**: INTERACTION dataset → `intersection_bev_generator_*.py` → BEV training data → `training.py` → model → `inference_prob_map.py` → `BEVPredProb/*.npy` → `InteractionMap` in planner → risk-aware trajectory selection.
+**Data flow**: INTERACTION dataset → `intersection_bev_generator_*.py` → BEV training data → `training.py` → model → `inference_prob_map.py` → `BEVPredProb/*.npy` → `BEVProbLoader` in planner → overlaid onto `InteractionMap` risk → risk-aware trajectory selection.
 
 **Key inheritance**: `Planner` → `FrenetPlanner`; `Agent` → `PlanningAgent`; `ScenarioHandler` → `ScenarioEvaluator`; `PlannerCreator` → `FrenetCreator`.
 
@@ -34,6 +34,27 @@ python inference_prob_map.py  # Generate probability maps
 ```
 
 No formal test suite exists. Validation is done by running `frenet_planner.py --scenario <name>` and checking output.
+
+### End-to-End Pipeline (BEV → Planner)
+
+```bash
+# Step 1: Generate BEV probability maps (requires trained model + GPU)
+cd bev_v2x_transformer
+python inference_prob_map.py   # Outputs to BEVPredProb/{k}_{timestamp_ms}/T1-T3.npy
+
+# Step 2: Ensure planning_fast.json has correct paths
+#   "bev_prob_dir": "/absolute/path/to/bev_v2x_transformer/BEVPredProb"
+#   "bev_weight": 1.0            (scale factor for BEV risk contribution)
+
+# Step 3: Create saved_fig directories
+cd EthicalTrajectoryPlanning
+python create_saved_fig_dirs.py
+
+# Step 4: Run planner (active_learning mode with BEV risk overlay)
+cd planner/Frenet
+python frenet_planner.py --scenario USA_Intersection-1_3_T-1.xml
+# Scenarios 3,5-8,11-13,... (134/155) have BEV data; others run with BEV risk = 0
+```
 
 ## Project Conventions
 
@@ -68,6 +89,75 @@ BEVLabel/BEVData files use naming `{k}_{timestamp_ms}.npy`:
 Total: 155 segments, 147 XML files. The 8 missing IDs (4, 24, 42, 62, 82, 102, 122, 142) are all segment index 3 of each recording — at CR step 451, no vehicle exists at `time_start_scenario` so `obstacle_start_at_zero=True` filtering discards all vehicles, causing `generate_single_scenario()` to return without writing a file (the ID is still consumed).
 
 **Scenario grouping by recording**: `group_scenarios_by_recording.py` copies XML files into `scenarios/track_000/` ~ `scenarios/track_007/` subfolders based on their source recording.
+
+## BEVPredProb Risk Integration
+
+### Overview
+
+`BEVProbLoader` (`planner/Frenet/utils/bev_prob_loader.py`) loads BEV Transformer prediction probability maps and overlays them as an additive risk factor onto the existing InteractionMap-based risk. This affects trajectory selection in both active_learning mode and standard planning mode.
+
+### Coordinate Transformation (CommonRoad ↔ BEV 288×288)
+
+BEV 288×288 covers 144m×144m at 0.5 m/pixel, centered at INTERACTION world (1003, 995).
+
+INTERACTION ↔ CommonRoad offset for USA_Intersection-1: `CR_x = INTER_x - 945`, `CR_y = INTER_y - 993.5`.
+
+```
+CommonRoad (x,y) → BEV pixel (row, col):
+  col_288 = 2 * (cr_x + 14.5)
+  row_288 = -2 * cr_y + 148
+```
+
+### BEVPredProb → Scenario Time Mapping
+
+BEV folder `{k}_{timestamp_ms}` → scenario time step:
+
+```
+CR_step = timestamp_ms / 100
+segment = (CR_step - 1) // 150
+time_step_in_scenario = (CR_step - 1) % 150
+scenario_id = ID_OFFSET[k] + segment
+  where ID_OFFSET = [1, 21, 39, 59, 79, 99, 119, 139]
+```
+
+T1.npy/T2.npy/T3.npy = BEV prediction for +1s/+2s/+3s from that timestamp. 134/155 scenarios have BEV data.
+
+### Risk Overlay Logic
+
+**Active_learning mode** (`traj_risk_calc` in `_step_planner`):
+```
+total_risk(traj) = Σ InteractionMap[i].sum_traj_risk(segment_i)
+                 + Σ BEVProbLoader.compute_segment_bev_risk(segment_i, t_index=i)
+```
+Each of the 3 InteractionMap segments (0–1.8s, 1.8–3.6s, 3.6–5.4s) uses the corresponding T1/T2/T3 prediction.
+
+**Standard planning mode** (after `sort_frenet_trajectories`):
+```
+for each valid trajectory fp:
+  bev_risk = Σ BEVProbLoader.query_prob(fp.x[i], fp.y[i], t_index)
+  fp.cost += bev_risk * bev_weight
+```
+Time-to-T mapping: 0–1.5s → T1, 1.5–2.5s → T2, 2.5s+ → T3.
+
+### Configuration (`planning_fast.json`)
+
+```json
+"active_learning": {
+  "bev_prob_dir": "/absolute/path/to/bev_v2x_transformer/BEVPredProb",
+  "bev_weight": 1.0
+}
+```
+
+- `bev_prob_dir`: Path to BEVPredProb root. Default auto-resolved to `../../bev_v2x_transformer/BEVPredProb` relative to project root.
+- `bev_weight`: Scaling factor for BEV risk contribution. Set to 0 to disable.
+
+### Modified/New Files
+
+| File | Changes |
+|---|---|
+| `planner/Frenet/utils/bev_prob_loader.py` | **New**: `BEVProbLoader` class with timestamp scanning, coordinate transform, prob querying |
+| `planner/Frenet/frenet_planner.py` | Import `BEVProbLoader`; init in both active_learning and standard mode; overlay BEV risk in `traj_risk_calc` and after `sort_frenet_trajectories` |
+| `planner/Frenet/configs/planning_fast.json` | Added `bev_prob_dir`, `bev_weight` fields |
 
 ## Visualization Conditions (active_learning mode)
 
@@ -164,13 +254,14 @@ plt.close(fig)                ← releases figure memory
 
 | File | Changes |
 |---|---|
-| `planner/Frenet/frenet_planner.py` | TkAgg→Agg (2 places); `plt.savefig`→`fig.savefig`; `plt.clf()`→`plt.close(fig)`/`plt.close('all')` (5 places); `self.original_scenario = copy.deepcopy(scenario)` at init; `get_prediction()` uses `original_scenario` for WaleNet/ground-truth/orientation |
+| `planner/Frenet/frenet_planner.py` | TkAgg→Agg (2 places); `plt.savefig`→`fig.savefig`; `plt.clf()`→`plt.close(fig)`/`plt.close('all')` (5 places); `self.original_scenario = copy.deepcopy(scenario)` at init; `get_prediction()` uses `original_scenario` for WaleNet/ground-truth/orientation; BEVProbLoader init + BEV risk overlay in both planning modes |
+| `planner/Frenet/utils/bev_prob_loader.py` | **New**: BEVPredProb loader with scenario mapping, coordinate transform, probability query |
 | `planner/Frenet/utils/visualization.py` | `plt.savefig`→`fig.savefig`; `FigureCanvasAgg(plt.gcf())`→`FigureCanvasAgg(fig)`; `time_begin: time_step`→`ego_time_step` |
 | `planner/Frenet/utils/InteractionMap.py` | `draw_map` accepts `fig,ax` params; scatter zorder 2→25; tree line zorder→25; `fig.savefig` + `plt.close(fig)`; `uncertainty_list` index clamping |
 | `planner/Frenet/utils/prediction_helpers.py` | `collision_checker_prediction`: clamp `end_time_step` to `len(pred_traj)`, use `len(x)` for `traj_length` |
 | `planner/Frenet/utils/traj_evaluate.py` | `query_time` clamping to prevent IndexError |
 | `commonroad/visualization/scenario.py` (site-packages) | Removed `transOffset=ax.transData` from 4 `PolyCollection` calls |
-| `planner/Frenet/configs/planning_fast.json` | `store_interval` 2.0→0.5 |
+| `planner/Frenet/configs/planning_fast.json` | `store_interval` 2.0→0.5; added `bev_prob_dir`, `bev_weight` |
 
 ## Key Dependencies
 

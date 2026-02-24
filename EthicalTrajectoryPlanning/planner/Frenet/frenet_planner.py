@@ -75,6 +75,7 @@ from planner.utils.responsibility import assign_responsibility_by_action_space
 from planner.utils import (reachable_set)
 from planner.Frenet.utils.InteractionMap import InteractionMap
 from planner.Frenet.utils.BehaviorTree import BehaviorTree
+from planner.Frenet.utils.bev_prob_loader import BEVProbLoader
 
 from risk_assessment.visualization.risk_visualization import (
     create_risk_files,
@@ -169,6 +170,18 @@ class FrenetPlanner(Planner):
                     self.tc_time_step = settings["active_learning"]["tc_time_step"]
                     self.tc_ego_id = settings["active_learning"]["tc_ego_id"]
                     self.tc_target = settings["active_learning"]["tc_target"]
+                    # Initialize BEV probability loader for risk overlay
+                    bev_prob_dir = settings["active_learning"].get(
+                        "bev_prob_dir",
+                        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
+                                     "bev_v2x_transformer", "BEVPredProb")
+                    )
+                    bev_weight = settings["active_learning"].get("bev_weight", 1.0)
+                    self.bev_prob_loader = BEVProbLoader(
+                        bev_prob_dir=bev_prob_dir,
+                        benchmark_id=scenario.benchmark_id,
+                        bev_weight=bev_weight,
+                    )
                     if self.prepare_fig_data:
                         self.saved_global_path = []
                         self.saved_hist_traj = []
@@ -314,6 +327,23 @@ class FrenetPlanner(Planner):
                     # get the shape group of the goal area
                     self.goal_area = get_goal_area_shape_group(
                         planning_problem=self.planning_problem, scenario=self.scenario
+                    )
+
+                # Initialize BEV probability loader for risk overlay (both modes)
+                if not self.active_learning:
+                    bev_prob_dir = os.path.join(
+                        os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
+                        "bev_v2x_transformer", "BEVPredProb"
+                    )
+                    if settings is not None and "active_learning" in settings:
+                        bev_prob_dir = settings["active_learning"].get("bev_prob_dir", bev_prob_dir)
+                        bev_weight = settings["active_learning"].get("bev_weight", 1.0)
+                    else:
+                        bev_weight = 1.0
+                    self.bev_prob_loader = BEVProbLoader(
+                        bev_prob_dir=bev_prob_dir,
+                        benchmark_id=scenario.benchmark_id,
+                        bev_weight=bev_weight,
                     )
 
                 self.initial_step = scenario.obstacle_by_id(self.ego_id).initial_state.time_step
@@ -465,6 +495,13 @@ class FrenetPlanner(Planner):
                         traj_risk = 0
                         for i, map in enumerate(self.interaction_maps):
                             traj_risk += map.sum_traj_risk(traj[i * search_length: (i + 1) * search_length])
+                        # Overlay BEVPredProb risk: add probability-based risk from
+                        # the BEV Transformer prediction for up to 3 future seconds
+                        if self.bev_prob_loader is not None and self.bev_prob_loader.is_available:
+                            self.bev_prob_loader.set_time_step(self.time_step)
+                            for i in range(min(3, len(self.interaction_maps))):
+                                seg = traj[i * search_length: (i + 1) * search_length]
+                                traj_risk += self.bev_prob_loader.compute_segment_bev_risk(seg, t_index=i)
                         return traj_risk
 
                     best_traj = None
@@ -783,6 +820,26 @@ class FrenetPlanner(Planner):
                 exec_timer=self.exec_timer,
                 reach_set=(self.reach_set if self.responsibility else None)
             )
+
+            # Overlay BEV probability risk onto trajectory costs (standard mode)
+            if hasattr(self, 'bev_prob_loader') and self.bev_prob_loader is not None and self.bev_prob_loader.is_available:
+                self.bev_prob_loader.set_time_step(self.time_step)
+                for fp in ft_list_valid:
+                    # Build trajectory point list from FrenetTrajectory x,y arrays
+                    bev_risk = 0.0
+                    dt_step = self.frenet_parameters["dt"]
+                    for idx in range(1, len(fp.x)):
+                        future_t = idx * dt_step
+                        if future_t <= 1.5:
+                            t_idx = 0
+                        elif future_t <= 2.5:
+                            t_idx = 1
+                        elif future_t <= 3.5:
+                            t_idx = 2
+                        else:
+                            t_idx = 2
+                        bev_risk += self.bev_prob_loader.query_prob(fp.x[idx], fp.y[idx], t_idx)
+                    fp.cost += bev_risk * self.bev_prob_loader.bev_weight
 
             with self.exec_timer.time_with_cm(
                     "simulation/sort trajectories/sort list by costs"

@@ -3,8 +3,11 @@
 		"SessionStart": [
 			{
 				"type": "command",
-				"command": "在写任何代码之前，在 Planning 模式下无尽地审问我的想法。不要假设任何问题。问问题直到没有假设剩下。
-				在编辑结束后将新情况update到CLAUDE.md文件中。"
+				"command": "Before writing any code, in Planning mode, endlessly question my ideas. Do not assume anything. Ask questions until there are no assumptions left."
+			},
+			{
+				"type": "command",
+				"command":"After editing, update the new situation in the .github/copilot-instructions.md file."
 			}
 		]
 	}

@@ -1,0 +1,42 @@
+{
+  "evaluation_settings":{
+    "timing_enabled": true,
+    "show_visualization": false,
+    "vehicle_type": "bmw_320i"
+  },
+  "frenet_settings": {
+    "mode": "risk",
+    "frenet_parameters": {
+      "t_list": [1.9],
+      "v_list_generation_mode": "deterministic",
+      "n_v_samples": 3,
+      "d_list": {
+        "d_max_abs": 3,
+        "n": 5
+      },
+      "dt": 0.1,
+      "v_thr": 3
+    }
+  },
+  "active_learning": {
+    "active_learning_enabled": true,
+    "prepare_figure_data": false,
+    "prepare_numerical_data": false,
+    "prepare_label": true,
+    "save_irl_feature": false,
+    "label_path": "/mnt/e/traj_bev/workspacebackup - 副本/EthicalTrajectoryPlanning/label",
+    "fig_path": "/mnt/e/traj_bev/workspacebackup - 副本/EthicalTrajectoryPlanning/figs",
+    "store_interval": 0.5,
+    "max_exploration_time": 5.4,
+    "search_step": 1.8,
+    "decay_rate": 1.0,
+    "trajectory_collect": false,
+    "tc_time_step": 60,
+    "tc_ego_id": 6,
+    "tc_target": [[[0.5], [9.98]],
+                  [[0, 0], [4.13, 0.01]],
+                  [[0, 0.5], [4.13, 4.13]],
+                  [[-0.5, -0.5, 0], [3.66, 3.7, 10.6]],
+                  [[0, 0, 0], [0.01, 6.63, 6.63]]]
+  }
+}

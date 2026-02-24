@@ -1,0 +1,11 @@
+{
+	"hooks": {
+		"SessionStart": [
+			{
+				"type": "command",
+				"command": "在写任何代码之前，在 Planning 模式下无尽地审问我的想法。不要假设任何问题。问问题直到没有假设剩下。
+				在编辑结束后将新情况update到CLAUDE.md文件中。"
+			}
+		]
+	}
+}

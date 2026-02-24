@@ -1,0 +1,12 @@
+__pycache__/
+bev_v2x_transformer/All_Predictions_Result/
+bev_v2x_transformer/BEVData_01/
+bev_v2x_transformer/BEVImgLabel_01/
+bev_v2x_transformer/BEVImgData_01/
+bev_v2x_transformer/BEVLabel_01/
+bev_v2x_transformer/BEVMaskData_01/
+bev_v2x_transformer/BEVPredProb/
+scenario_vis/
+scenarios/
+saved_fig/
+

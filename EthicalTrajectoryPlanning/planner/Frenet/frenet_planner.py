@@ -495,13 +495,17 @@ class FrenetPlanner(Planner):
                         traj_risk = 0
                         for i, map in enumerate(self.interaction_maps):
                             traj_risk += map.sum_traj_risk(traj[i * search_length: (i + 1) * search_length])
-                        # Overlay BEVPredProb risk: add probability-based risk from
-                        # the BEV Transformer prediction for up to 3 future seconds
+                        # Overlay BEVPredProb risk: use max probability across
+                        # all 3 segments (avoids biasing toward shorter trajectories)
                         if self.bev_prob_loader is not None and self.bev_prob_loader.is_available:
                             self.bev_prob_loader.set_time_step(self.time_step)
+                            max_seg_prob = 0.0
                             for i in range(min(3, len(self.interaction_maps))):
                                 seg = traj[i * search_length: (i + 1) * search_length]
-                                traj_risk += self.bev_prob_loader.compute_segment_bev_risk(seg, t_index=i)
+                                seg_prob = self.bev_prob_loader.compute_segment_bev_risk(seg, t_index=i)
+                                if seg_prob > max_seg_prob:
+                                    max_seg_prob = seg_prob
+                            traj_risk += max_seg_prob
                         return traj_risk
 
                     best_traj = None
@@ -822,11 +826,12 @@ class FrenetPlanner(Planner):
             )
 
             # Overlay BEV probability risk onto trajectory costs (standard mode)
+            # Use max probability along the trajectory instead of sum to avoid
+            # biasing toward shorter/faster trajectories.
             if hasattr(self, 'bev_prob_loader') and self.bev_prob_loader is not None and self.bev_prob_loader.is_available:
                 self.bev_prob_loader.set_time_step(self.time_step)
                 for fp in ft_list_valid:
-                    # Build trajectory point list from FrenetTrajectory x,y arrays
-                    bev_risk = 0.0
+                    max_bev_prob = 0.0
                     dt_step = self.frenet_parameters["dt"]
                     for idx in range(1, len(fp.x)):
                         future_t = idx * dt_step
@@ -838,8 +843,10 @@ class FrenetPlanner(Planner):
                             t_idx = 2
                         else:
                             t_idx = 2
-                        bev_risk += self.bev_prob_loader.query_prob(fp.x[idx], fp.y[idx], t_idx)
-                    fp.cost += bev_risk * self.bev_prob_loader.bev_weight
+                        p = self.bev_prob_loader.query_prob(fp.x[idx], fp.y[idx], t_idx)
+                        if p > max_bev_prob:
+                            max_bev_prob = p
+                    fp.cost += max_bev_prob * self.bev_prob_loader.bev_weight
 
             with self.exec_timer.time_with_cm(
                     "simulation/sort trajectories/sort list by costs"

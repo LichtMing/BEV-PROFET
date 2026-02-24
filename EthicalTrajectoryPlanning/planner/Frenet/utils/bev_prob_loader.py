@@ -285,12 +285,14 @@ class BEVProbLoader:
             dt: Time step between trajectory points (default 0.1s).
 
         Returns:
-            Weighted sum of BEV probabilities along the trajectory.
+            Maximum BEV probability along the trajectory, scaled by
+            bev_weight.  Using max instead of sum avoids biasing toward
+            shorter (faster) trajectories and keeps the value in [0, 1].
         """
         if self._cached_maps is None:
             return 0.0
 
-        risk_sum = 0.0
+        max_prob = 0.0
         for i, point in enumerate(traj):
             x, y = point[0], point[1]
 
@@ -308,13 +310,14 @@ class BEVProbLoader:
             elif future_time_s <= 3.5:
                 t_idx = 2   # T3
             else:
-                # Beyond T3 prediction range, use T3 with decay
+                # Beyond T3 prediction range, use T3
                 t_idx = 2
 
             prob = self.query_prob(x, y, t_idx)
-            risk_sum += prob * self.bev_weight
+            if prob > max_prob:
+                max_prob = prob
 
-        return risk_sum
+        return max_prob * self.bev_weight
 
     def compute_segment_bev_risk(
         self,
@@ -330,18 +333,19 @@ class BEVProbLoader:
             t_index: Which T prediction to use (0=T1, 1=T2, 2=T3).
 
         Returns:
-            Sum of BEV probabilities along the segment.
+            Maximum BEV probability in the segment, scaled by bev_weight.
         """
         if self._cached_maps is None:
             return 0.0
 
-        risk_sum = 0.0
+        max_prob = 0.0
         for point in traj_segment:
             x, y = point[0], point[1]
             prob = self.query_prob(x, y, t_index)
-            risk_sum += prob * self.bev_weight
+            if prob > max_prob:
+                max_prob = prob
 
-        return risk_sum
+        return max_prob * self.bev_weight
 
     @property
     def is_available(self) -> bool:

@@ -61,6 +61,28 @@ def weighted_line(r0, c0, r1, c1, w, rmin=0, rmax=np.inf):
     return (yy[mask].astype(int), xx[mask].astype(int), vals[mask])
 
 class InteractionMap(object):
+    """Risk accumulation map with optional adaptive (non-uniform) resolution.
+
+    When ``adaptive_resolution=True`` a piecewise-linear coordinate
+    compression is applied so that grid cells close to the ego vehicle
+    keep the original fine resolution (``size``) while cells further away
+    are progressively coarser.  This dramatically reduces the grid pixel
+    count (and therefore memory + ``weighted_line`` cost) without
+    sacrificing precision near the vehicle.
+
+    Resolution bands (default, configurable via ``res_bands``):
+        +-----------+----------+------------------+
+        | Distance  | m / pixel| Coverage         |
+        +-----------+----------+------------------+
+        |  0 – 20 m |  0.5     | ego vicinity     |
+        | 20 – 50 m |  1.5     | mid-range        |
+        | 50 –100 m |  4.0     | far periphery    |
+        +-----------+----------+------------------+
+
+    When ``adaptive_resolution=False`` the map behaves identically to
+    the original uniform grid.
+    """
+
     def __init__(
             self,
             bev_map: np.ndarray,
@@ -68,26 +90,105 @@ class InteractionMap(object):
             size: float,
             obs_width: float,
             update_length: int,
+            adaptive_resolution: bool = True,
+            res_bands: list = None,
     ):
-        self.bev_map = bev_map
-        self.risk_map = np.full_like(bev_map, fill_value=0, dtype=np.float64)
-        self.tree_map = np.full_like(bev_map, fill_value=0, dtype=np.float64)
-        self.visited_map = np.full_like(bev_map, fill_value=0.001, dtype=np.float64)
-        self.origin = anchor_state.position - np.array(bev_map.shape) * size / 2
-        self.length, self.width = np.array(bev_map.shape) * size
-        self.size = size
-        self.update_length = update_length
         self.anchor_state = anchor_state
+        self.size = size                     # finest resolution (m/px)
+        self.update_length = update_length
+        self.obs_width = obs_width
+        self.adaptive = adaptive_resolution
+        self.ego_center = anchor_state.position.copy()
+
+        # ── Resolution bands ──
+        # Each entry: (radius_m, meters_per_pixel)
+        # Must be sorted by radius ascending. The last band extends to ∞.
+        if res_bands is None:
+            res_bands = [
+                (20.0, size),          # 0.5 m/px
+                (50.0, size * 3),      # 1.5 m/px
+                (100.0, size * 8),     # 4.0 m/px
+            ]
+        self.res_bands = res_bands
+
+        if self.adaptive:
+            # Build the piecewise-linear mapping tables
+            self._build_nonlinear_mapping()
+            grid_side = self._half_pixels * 2
+            self.risk_map = np.zeros((grid_side, grid_side), dtype=np.float64)
+            self.tree_map = np.zeros((grid_side, grid_side), dtype=np.float64)
+            self.visited_map = np.full((grid_side, grid_side), 0.001, dtype=np.float64)
+            self.risk_map_vertical = np.zeros((grid_side, grid_side), dtype=np.float64)
+            self.visited_map_vertical = np.full((grid_side, grid_side), 0.001, dtype=np.float64)
+            self.bev_map = np.zeros((grid_side, grid_side), dtype=bev_map.dtype)
+            # length/width in metres that the grid covers
+            self.length = self.res_bands[-1][0] * 2
+            self.width = self.length
+        else:
+            # Original uniform behaviour
+            self.bev_map = bev_map
+            self.risk_map = np.full_like(bev_map, fill_value=0, dtype=np.float64)
+            self.tree_map = np.full_like(bev_map, fill_value=0, dtype=np.float64)
+            self.visited_map = np.full_like(bev_map, fill_value=0.001, dtype=np.float64)
+            self.risk_map_vertical = np.full_like(bev_map, fill_value=0, dtype=np.float64)
+            self.visited_map_vertical = np.full_like(bev_map, fill_value=0.001, dtype=np.float64)
+            self.length, self.width = np.array(bev_map.shape) * size
+
+        self.origin = anchor_state.position - np.array([self.length, self.width]) / 2
+        self.rotation = anchor_state.orientation
+        self.res = self.length / self.size
+
         colors = ["#739D2E", "#87BB33", "#FEE599", "#EA700D", "#FF3C3C"]
         nodes = [0.0, 0.25, 0.5, 0.75, 1.0]
         self.cmap = LinearSegmentedColormap.from_list("mycmap", list(zip(nodes, colors)))
-        # self.cmap = plt.get_cmap('RdYlGn_r')
-        # align with the walenet
-        self.risk_map_vertical = np.full_like(bev_map, fill_value=0, dtype=np.float64)
-        self.visited_map_vertical = np.full_like(bev_map, fill_value=0.001, dtype=np.float64)
-        self.rotation = anchor_state.orientation
-        self.res = self.length / self.size
-        self.obs_width = obs_width
+
+    # ── Non-linear coordinate mapping ──────────────────────────────────
+
+    def _build_nonlinear_mapping(self):
+        """Pre-compute cumulative pixel offsets at each band boundary."""
+        # _band_cumul_px[i] = total pixels from center to the outer edge of
+        # band i.  Used by _world_to_pixel for fast piecewise‐linear lookup.
+        self._band_cumul_px = []
+        cumul = 0.0
+        prev_r = 0.0
+        for radius_m, mpp in self.res_bands:
+            cumul += (radius_m - prev_r) / mpp
+            self._band_cumul_px.append(cumul)
+            prev_r = radius_m
+        # half_pixels = pixels from center to outer edge (ceil for safety)
+        self._half_pixels = int(math.ceil(cumul)) + 1
+
+    def _coord_to_pixel_1d(self, d: float) -> int:
+        """Map a signed distance (m) from ego center to pixel offset from
+        grid center using the piecewise-linear compression."""
+        sign = 1 if d >= 0 else -1
+        ad = abs(d)
+        prev_r = 0.0
+        cumul = 0.0
+        for i, (radius_m, mpp) in enumerate(self.res_bands):
+            if ad <= radius_m:
+                cumul += (ad - prev_r) / mpp
+                return int(sign * cumul + self._half_pixels)
+            cumul += (radius_m - prev_r) / mpp
+            prev_r = radius_m
+        # Beyond last band — extrapolate with last resolution
+        cumul += (ad - prev_r) / self.res_bands[-1][1]
+        return int(sign * cumul + self._half_pixels)
+
+    def _pixel_to_coord_1d(self, px: int) -> float:
+        """Inverse: pixel offset from grid center → signed distance in m."""
+        p = px - self._half_pixels  # signed pixel from center
+        sign = 1 if p >= 0 else -1
+        ap = abs(p)
+        prev_r = 0.0
+        cumul = 0.0
+        for radius_m, mpp in self.res_bands:
+            band_px = (radius_m - prev_r) / mpp
+            if ap <= cumul + band_px:
+                return sign * (prev_r + (ap - cumul) * mpp)
+            cumul += band_px
+            prev_r = radius_m
+        return sign * (prev_r + (ap - cumul) * self.res_bands[-1][1])
 
     def update_map(
             self,
@@ -104,6 +205,7 @@ class InteractionMap(object):
         if update_range is None:
             update_range = self.update_length
         grid_risk = risk_value
+        grid_max = self.risk_map.shape[0]
         risk_after_collision = []
         for i in range(update_range, 0, -1):
             p1 = trajectory.get_global_state(i).position
@@ -115,19 +217,22 @@ class InteractionMap(object):
                 pixel_position_2 = self.position_to_pixel(p2)
 
                 if pixel_position_1 == pixel_position_2:
-                    self.risk_map[pixel_position_1[0], pixel_position_1[1]] += grid_risk
-                    self.visited_map[pixel_position_1[0], pixel_position_1[1]] += 1
+                    r, c = pixel_position_1
+                    if 0 <= r < grid_max and 0 <= c < grid_max:
+                        self.risk_map[r, c] += grid_risk
+                        self.visited_map[r, c] += 1
                 else:
                     if trajectory.uncertainty_list is not None and grid_risk > 0.1:
                         unc_idx = min(i - 1, len(trajectory.uncertainty_list) - 1)
                         rr, cc, vals = weighted_line(*pixel_position_1, *pixel_position_2, w=4+self.confidence_width(trajectory.uncertainty_list[unc_idx]),
-                                                     rmin=0, rmax=400)
+                                                     rmin=0, rmax=grid_max)
                     else:
-                        rr, cc, vals = weighted_line(*pixel_position_1, *pixel_position_2, w=5, rmin=0, rmax=400)
+                        rr, cc, vals = weighted_line(*pixel_position_1, *pixel_position_2, w=5, rmin=0, rmax=grid_max)
 
-                    # rr, cc, vals = line_aa(*pixel_position_1, *pixel_position_2)
-                    # rr = rr[1:]
-                    # cc = cc[1:]
+                    # Clamp columns to valid range
+                    mask = (cc >= 0) & (cc < grid_max)
+                    rr, cc, vals = rr[mask], cc[mask], vals[mask]
+
                     self.risk_map[rr, cc] += grid_risk * vals
                     self.visited_map[rr, cc] += 1
 
@@ -173,15 +278,26 @@ class InteractionMap(object):
         return max(ell_radius_x, ell_radius_y)
 
     def position_to_pixel(self, position):
+        if self.adaptive:
+            d = position - self.ego_center
+            return [self._coord_to_pixel_1d(d[0]),
+                    self._coord_to_pixel_1d(d[1])]
         relative_position = position - self.origin
         pixel_position = [int(coordinate // self.size) for coordinate in relative_position]
         return pixel_position
 
     def rel_position_to_pixel(self, rel_position):
+        if self.adaptive:
+            return [self._coord_to_pixel_1d(rel_position[0]),
+                    self._coord_to_pixel_1d(rel_position[1])]
         pixel_position = [int(coordinate // self.size + self.res / 2) for coordinate in rel_position]
         return pixel_position
 
     def in_map_check(self, position):
+        if self.adaptive:
+            d = position - self.ego_center
+            max_r = self.res_bands[-1][0]
+            return abs(d[0]) < max_r and abs(d[1]) < max_r
         diff = position - self.origin
         if max(diff) >= self.length or min(diff) < 0:
             return False
@@ -189,12 +305,19 @@ class InteractionMap(object):
             return True
 
     def in_map_check_rel(self, rel_position):
+        if self.adaptive:
+            max_r = self.res_bands[-1][0]
+            return abs(rel_position[0]) < max_r and abs(rel_position[1]) < max_r
         if max(abs(rel_position)) > self.length / 2:
             return False
         else:
             return True
 
     def pixel_to_position(self, pixel):
+        if self.adaptive:
+            return self.ego_center + np.array([
+                self._pixel_to_coord_1d(pixel[0]),
+                self._pixel_to_coord_1d(pixel[1])])
         return self.origin + pixel * self.size
 
     def get_map(self):
@@ -221,8 +344,15 @@ class InteractionMap(object):
             ):
         # self.map_post_processing()
         pixel_to_plot = np.where(self.visited_map > 0.001)
-        plot_map = np.where(self.visited_map > 0.001, 1, 0)
-        global_positions = pixel_to_plot * np.array(self.size) + self.origin[:, np.newaxis]
+        if self.adaptive:
+            # Non-linear pixel → world position
+            rows, cols = pixel_to_plot
+            gx = np.array([self._pixel_to_coord_1d(int(r)) for r in rows]) + self.ego_center[0]
+            gy = np.array([self._pixel_to_coord_1d(int(c)) for c in cols]) + self.ego_center[1]
+            global_positions = (gx, gy)
+        else:
+            global_positions = pixel_to_plot * np.array(self.size) + self.origin[:, np.newaxis]
+            global_positions = (global_positions[0], global_positions[1])
         a1 = ax.scatter(global_positions[0], global_positions[1], s=(200./fig.dpi)**2, marker='s', c=self.cmap(self.risk_map[pixel_to_plot]), alpha=0.8, zorder=25)
         # try:
         #     shape = alphashape.alphashape(list(zip(global_positions[0], global_positions[1])))
@@ -251,9 +381,12 @@ class InteractionMap(object):
 
     def sum_traj_risk(self, traj: [[float]]):
         risk_sum = 0
+        grid_max = self.risk_map.shape[0]
         for (x, y, s, d, v, yaw) in traj:
             pos = np.asarray([x, y])
             if self.in_map_check(pos):
                 pixel_pos = self.position_to_pixel(pos)
-                risk_sum += self.risk_map[pixel_pos[0], pixel_pos[1]]
+                r, c = pixel_pos[0], pixel_pos[1]
+                if 0 <= r < grid_max and 0 <= c < grid_max:
+                    risk_sum += self.risk_map[r, c]
         return risk_sum

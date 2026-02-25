@@ -127,17 +127,19 @@ T1.npy/T2.npy/T3.npy = BEV prediction for +1s/+2s/+3s from that timestamp. 134/1
 **Active_learning mode** (`traj_risk_calc` in `_step_planner`):
 ```
 total_risk(traj) = Σ InteractionMap[i].sum_traj_risk(segment_i)
-                 + Σ BEVProbLoader.compute_segment_bev_risk(segment_i, t_index=i)
+                 + max_i{ BEVProbLoader.compute_segment_bev_risk(segment_i, t_index=i) }
 ```
-Each of the 3 InteractionMap segments (0–1.8s, 1.8–3.6s, 3.6–5.4s) uses the corresponding T1/T2/T3 prediction.
+Each of the 3 InteractionMap segments (0–1.8s, 1.8–3.6s, 3.6–5.4s) uses the corresponding T1/T2/T3 prediction. The BEV contribution is the **max** across segments (not sum) to avoid biasing toward shorter trajectories.
 
 **Standard planning mode** (after `sort_frenet_trajectories`):
 ```
 for each valid trajectory fp:
-  bev_risk = Σ BEVProbLoader.query_prob(fp.x[i], fp.y[i], t_index)
-  fp.cost += bev_risk * bev_weight
+  max_bev_prob = max over i { BEVProbLoader.query_prob(fp.x[i], fp.y[i], t_index) }
+  fp.cost += max_bev_prob * bev_weight
 ```
 Time-to-T mapping: 0–1.5s → T1, 1.5–2.5s → T2, 2.5s+ → T3.
+
+**Note**: Using `max` instead of `sum` ensures: (1) risk stays in [0, 1] × bev_weight, (2) fast trajectories that rush through danger are not rewarded for having fewer sample points, (3) the trajectory's danger is determined by its most hazardous point.
 
 ### Configuration (`planning_fast.json`)
 
@@ -205,6 +207,41 @@ In `frenet_planner.py` `_step_planner()`, figures are only generated when **all*
 16. **`collision_checker_prediction` IndexError on prediction array slicing**: The formula `traj_length = (end_time_step - start_time_step) / time_interval` computes length mathematically, but the actual numpy slice `pred_traj[:, 0][start:end:step]` gets truncated when `end_time_step > len(pred_traj)`. This causes IndexError in the list comprehension `[[x[i], y[i], pred_orientation[i]] for i in range(int(traj_length))]`. **Fixed**: clamp `end_time_step = min(end_time_step, len(pred_traj))` before slicing, skip if `end <= start`, use `traj_length = len(x)` (actual sliced length) instead of the formula.
 17. **`InteractionMap.update_map` uncertainty_list index OOB**: `trajectory.uncertainty_list` (from collision covariance slice) may be shorter than `update_range` (=17). Accessing `uncertainty_list[i-1]` with `i` up to 17 causes IndexError. **Fixed**: clamped index to `min(i-1, len(trajectory.uncertainty_list)-1)`.
 
+## InteractionMap Adaptive Non-Uniform Resolution
+
+`InteractionMap` supports an optional `adaptive_resolution=True` mode (default on) that uses a piecewise-linear coordinate compression around the ego vehicle. Grid cells near ego keep the original 0.5 m/pixel resolution; cells further away become progressively coarser via the compression function.
+
+### Resolution Bands (default)
+
+| Distance from ego | Resolution | Pixel ↔ m | Single-axis coverage |
+|---|---|---|---|
+| 0 – 20 m | 0.5 m/px | 2 px/m | ±40 px |
+| 20 – 50 m | 1.5 m/px | 0.67 px/m | ±20 px |
+| 50 – 100 m | 4.0 m/px | 0.25 px/m | ±12.5 px |
+
+Total grid: **148 × 148 = 21,904 pixels** vs original 400 × 400 = 160,000 (**7.3× compression**).
+
+Configurable via `res_bands` parameter: `[(radius_m, meters_per_pixel), ...]`.
+
+### Coordinate Transform
+
+The `position_to_pixel()` method applies the piecewise-linear compression independently on each axis:
+```
+d = position - ego_center           # signed distance from ego
+|d| < 20m  →  pixel_offset = d / 0.5     (fine, same as original)
+20 ≤ |d| < 50m  →  pixel_offset = 40 + (|d| - 20) / 1.5  (mid)
+|d| ≥ 50m  →  pixel_offset = 60 + (|d| - 50) / 4.0  (coarse)
+```
+`pixel_to_position()` is the exact inverse.  All existing methods (`update_map`, `sum_traj_risk`, `draw_map`, `in_map_check`) are updated to use the non-linear mapping when `adaptive=True`, with bounds-checking on array access. `weighted_line`'s `rmax` parameter is set dynamically to the actual grid side length.
+
+### Accuracy
+
+Near ego (d < 20m): **0.00m** round-trip error (identical to original). Mid-range (d ≈ 32m): ~0.5m. Far (d ≈ 100m): ~2.0m. Since risk accumulation at far distances is inherently uncertain, this precision loss is acceptable.
+
+### Disabling
+
+Pass `adaptive_resolution=False` to `InteractionMap(...)` to revert to the original uniform 400×400 grid.
+
 ## Visualization Architecture (active_learning mode)
 
 ### Image Types and Time Steps
@@ -257,7 +294,7 @@ plt.close(fig)                ← releases figure memory
 | `planner/Frenet/frenet_planner.py` | TkAgg→Agg (2 places); `plt.savefig`→`fig.savefig`; `plt.clf()`→`plt.close(fig)`/`plt.close('all')` (5 places); `self.original_scenario = copy.deepcopy(scenario)` at init; `get_prediction()` uses `original_scenario` for WaleNet/ground-truth/orientation; BEVProbLoader init + BEV risk overlay in both planning modes |
 | `planner/Frenet/utils/bev_prob_loader.py` | **New**: BEVPredProb loader with scenario mapping, coordinate transform, probability query |
 | `planner/Frenet/utils/visualization.py` | `plt.savefig`→`fig.savefig`; `FigureCanvasAgg(plt.gcf())`→`FigureCanvasAgg(fig)`; `time_begin: time_step`→`ego_time_step` |
-| `planner/Frenet/utils/InteractionMap.py` | `draw_map` accepts `fig,ax` params; scatter zorder 2→25; tree line zorder→25; `fig.savefig` + `plt.close(fig)`; `uncertainty_list` index clamping |
+| `planner/Frenet/utils/InteractionMap.py` | `draw_map` accepts `fig,ax` params; scatter zorder 2→25; tree line zorder→25; `fig.savefig` + `plt.close(fig)`; `uncertainty_list` index clamping; **adaptive non-uniform resolution** (see below) |
 | `planner/Frenet/utils/prediction_helpers.py` | `collision_checker_prediction`: clamp `end_time_step` to `len(pred_traj)`, use `len(x)` for `traj_length` |
 | `planner/Frenet/utils/traj_evaluate.py` | `query_time` clamping to prevent IndexError |
 | `commonroad/visualization/scenario.py` (site-packages) | Removed `transOffset=ax.transData` from 4 `PolyCollection` calls |

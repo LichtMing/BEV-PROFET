@@ -190,6 +190,19 @@ class InteractionMap(object):
             prev_r = radius_m
         return sign * (prev_r + (ap - cumul) * self.res_bands[-1][1])
 
+    def _mpp_at_pixel_1d(self, px: int) -> float:
+        """Return the meters-per-pixel at a given pixel offset."""
+        p = abs(px - self._half_pixels)
+        cumul = 0.0
+        prev_r = 0.0
+        for radius_m, mpp in self.res_bands:
+            band_px = (radius_m - prev_r) / mpp
+            if p <= cumul + band_px:
+                return mpp
+            cumul += band_px
+            prev_r = radius_m
+        return self.res_bands[-1][1]
+
     def update_map(
             self,
             trajectory: FrenetTrajectory,
@@ -345,15 +358,23 @@ class InteractionMap(object):
         # self.map_post_processing()
         pixel_to_plot = np.where(self.visited_map > 0.001)
         if self.adaptive:
-            # Non-linear pixel → world position
+            # Non-linear pixel → world position + variable marker sizes
             rows, cols = pixel_to_plot
             gx = np.array([self._pixel_to_coord_1d(int(r)) for r in rows]) + self.ego_center[0]
             gy = np.array([self._pixel_to_coord_1d(int(c)) for c in cols]) + self.ego_center[1]
             global_positions = (gx, gy)
+            # Each pixel's marker area scales with the square of its local
+            # meters-per-pixel so that cells visually fill their physical area.
+            base_s = (200. / fig.dpi) ** 2   # base size for 0.5 m/px
+            mpp_row = np.array([self._mpp_at_pixel_1d(int(r)) for r in rows])
+            mpp_col = np.array([self._mpp_at_pixel_1d(int(c)) for c in cols])
+            mpp_max = np.maximum(mpp_row, mpp_col)
+            sizes = base_s * (mpp_max / self.size) ** 2
         else:
             global_positions = pixel_to_plot * np.array(self.size) + self.origin[:, np.newaxis]
             global_positions = (global_positions[0], global_positions[1])
-        a1 = ax.scatter(global_positions[0], global_positions[1], s=(200./fig.dpi)**2, marker='s', c=self.cmap(self.risk_map[pixel_to_plot]), alpha=0.8, zorder=25)
+            sizes = (200. / fig.dpi) ** 2
+        a1 = ax.scatter(global_positions[0], global_positions[1], s=sizes, marker='s', c=self.cmap(self.risk_map[pixel_to_plot]), alpha=0.8, zorder=25)
         # try:
         #     shape = alphashape.alphashape(list(zip(global_positions[0], global_positions[1])))
         # except:

@@ -39,6 +39,10 @@
                   [[-0.5, -0.5, 0], [3.66, 3.7, 10.6]],
                   [[0, 0, 0], [0.01, 6.63, 6.63]]],
     "bev_prob_dir": "/mnt/e/traj_bev/workspacebackup - 副本/bev_v2x_transformer/BEVPredProb",
-    "bev_weight": 1.0
+    "bev_weight": 1.0,
+    "resolution_mode": "linear",
+    "linear_growth_rate": 0.03,
+    "speed_band_scale": 0.02,
+    "speed_risk_factor": 0.02
   }
 }

@@ -1,3 +1,5 @@
+import os
+import csv
 import numpy as np
 from commonroad.scenario.scenario import Scenario
 from scipy.integrate import simps
@@ -125,15 +127,17 @@ def calc_eval_values(scenario: Scenario, ego_id, time_step, traj, reference_spli
     return {"ttc": ttc, "thw": thw}
 
 class TrajLogger(object):
-    def __init__(self, log_prefix, points_num):
+    def __init__(self, log_prefix, points_num, save_dir=None):
         self.db_s, self.db_v, self.db_a, self.db_r = [], [], [], []
         self.db_t_pred, self.db_t_planning, self.db_t_evaluation = [], [], []
         self.db_ttc, self.db_thw = [], []
+        self.db_ego_id, self.db_time_step = [], []
         self.s_avg, self.v_avg, self.a_avg, self.r_avg = 0, 0, 0, 0
         self.t_pred_avg, self.t_planning_avg, self.t_evaluation_avg = 0, 0, 0
         self.ttc_avg, self.thw_avg = -1, -1
         self.log_prefix = log_prefix
         self.points_num = points_num
+        self.save_dir = save_dir
         self.db_length = 0
 
     def record_traj(self, ego_id, time_step, traj, risk, eval_res, duration_pred, duration_planning, duration_evaluation):
@@ -144,6 +148,8 @@ class TrajLogger(object):
         self.db_v.append(v)
         self.db_a.append(a)
         self.db_r.append(risk)
+        self.db_ego_id.append(ego_id)
+        self.db_time_step.append(time_step)
         self.db_t_pred.append(duration_pred)
         self.db_t_planning.append(duration_planning)
         self.db_t_evaluation.append(duration_evaluation)
@@ -154,7 +160,7 @@ class TrajLogger(object):
         print("vehicle {} at {}'s traj from {} : s {}, v {}, a {}, r {}, ttc {}, thw {}".format(ego_id, time_step, self.log_prefix,
                                                                           s, v, a, risk, eval_res["ttc"], eval_res["thw"]))
 
-    def log_average_traj_data(self):
+    def log_average_traj_data(self, save_dir=None):
         self.s_avg = np.mean(self.db_s)
         self.v_avg = np.mean(self.db_v)
         self.a_avg = np.mean(self.db_a)
@@ -169,12 +175,17 @@ class TrajLogger(object):
                                                                           self.s_avg, self.v_avg, self.a_avg, self.r_avg, self.r_avg / self.points_num,
                                                                             self.t_pred_avg, self.t_planning_avg, self.t_evaluation_avg,
                                                                               self.ttc_avg, self.thw_avg))
+        out_dir = save_dir or self.save_dir
+        if out_dir is not None:
+            self.save_to_csv(out_dir)
 
     def extend_logger(self, logger):
         self.db_s.extend(logger.db_s)
         self.db_a.extend(logger.db_a)
         self.db_v.extend(logger.db_v)
         self.db_r.extend(logger.db_r)
+        self.db_ego_id.extend(logger.db_ego_id)
+        self.db_time_step.extend(logger.db_time_step)
         self.db_t_pred.extend(logger.db_t_pred)
         self.db_t_planning.extend(logger.db_t_planning)
         self.db_t_evaluation.extend(logger.db_t_evaluation)
@@ -194,3 +205,40 @@ class TrajLogger(object):
 
     def average_velocity(self, traj):
         return np.mean([s[4] for s in traj])
+
+    def save_to_csv(self, save_dir):
+        """Save per-step records and average summary to CSV files in save_dir."""
+        os.makedirs(save_dir, exist_ok=True)
+        tag = self.log_prefix.replace(" ", "_")
+
+        # --- per-step detail CSV ---
+        detail_path = os.path.join(save_dir, f"eval_detail_{tag}.csv")
+        with open(detail_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["ego_id", "time_step", "travel_distance", "avg_velocity",
+                             "acc_cost", "cumulative_risk", "t_pred", "t_planning", "t_evaluation"])
+            for i in range(len(self.db_s)):
+                writer.writerow([
+                    self.db_ego_id[i] if i < len(self.db_ego_id) else "",
+                    self.db_time_step[i] if i < len(self.db_time_step) else "",
+                    self.db_s[i], self.db_v[i], self.db_a[i], self.db_r[i],
+                    self.db_t_pred[i], self.db_t_planning[i], self.db_t_evaluation[i],
+                ])
+
+        # --- average summary CSV ---
+        summary_path = os.path.join(save_dir, f"eval_summary_{tag}.csv")
+        with open(summary_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["metric", "value"])
+            writer.writerow(["avg_travel_distance", self.s_avg])
+            writer.writerow(["avg_velocity", self.v_avg])
+            writer.writerow(["avg_acc_cost", self.a_avg])
+            writer.writerow(["avg_cumulative_risk", self.r_avg])
+            writer.writerow(["avg_risk_per_point", self.r_avg / self.points_num if self.points_num else 0])
+            writer.writerow(["avg_ttc", self.ttc_avg])
+            writer.writerow(["avg_thw", self.thw_avg])
+            writer.writerow(["avg_t_pred", self.t_pred_avg])
+            writer.writerow(["avg_t_planning", self.t_planning_avg])
+            writer.writerow(["avg_t_evaluation", self.t_evaluation_avg])
+            writer.writerow(["num_records", len(self.db_s)])
+        print(f"Evaluation saved to {detail_path} and {summary_path}")

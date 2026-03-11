@@ -154,6 +154,8 @@ class FrenetPlanner(Planner):
 
                 self.active_learning = active_learning
                 if self.active_learning:
+                    # Store active_learning config for InteractionMap parameters
+                    self.planning_config = settings.get("active_learning", {}) if settings else {}
                     # Store original scenario with full trajectories for prediction
                     # update_scenario() truncates all agent trajectories during simulation,
                     # which makes WaleNet/ground_truth prediction unable to see future positions.
@@ -354,8 +356,9 @@ class FrenetPlanner(Planner):
                     self.reference_traj = copy.deepcopy(scenario.obstacle_by_id(
                         self.ego_id
                     ).prediction.trajectory)
-                    self.gt_traj_logger = TrajLogger(log_prefix="car " + str(self.ego_id) + " dataset", points_num=self.traj_length * 3)
-                    self.search_traj_logger = TrajLogger(log_prefix="car " + str(self.ego_id) + " search tree", points_num=self.traj_length * 3)
+                    eval_save_dir = os.path.join("../../saved_fig", scenario.benchmark_id)
+                    self.gt_traj_logger = TrajLogger(log_prefix="car " + str(self.ego_id) + " dataset", points_num=self.traj_length * 3, save_dir=eval_save_dir)
+                    self.search_traj_logger = TrajLogger(log_prefix="car " + str(self.ego_id) + " search tree", points_num=self.traj_length * 3, save_dir=eval_save_dir)
                     self.exec_timer.stop_timer("initialization/total")
         except ExecutionTimeoutError:
             raise TimeoutError
@@ -470,7 +473,13 @@ class FrenetPlanner(Planner):
                                                             anchor_state=self.ego_state,
                                                             size=0.5,
                                                             obs_width=2.0,
-                                                            update_length=int(self.frenet_parameters["t_list"][0] // self.frenet_parameters["dt"]) - 1) for _ in range(3)]
+                                                            update_length=int(self.frenet_parameters["t_list"][0] // self.frenet_parameters["dt"]) - 1,
+                                                            resolution_mode=self.planning_config.get("resolution_mode", "bands"),
+                                                            linear_growth_rate=self.planning_config.get("linear_growth_rate", 0.03),
+                                                            ego_velocity=self.ego_state.velocity,
+                                                            speed_band_scale=self.planning_config.get("speed_band_scale", 0.02),
+                                                            speed_risk_factor=self.planning_config.get("speed_risk_factor", 0.02),
+                                                            ) for _ in range(3)]
                     valid_trajectories = []
                     time_a = time.time()
 

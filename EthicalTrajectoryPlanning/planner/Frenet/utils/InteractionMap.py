@@ -63,14 +63,10 @@ def weighted_line(r0, c0, r1, c1, w, rmin=0, rmax=np.inf):
 class InteractionMap(object):
     """Risk accumulation map with optional adaptive (non-uniform) resolution.
 
-    When ``adaptive_resolution=True`` a piecewise-linear coordinate
-    compression is applied so that grid cells close to the ego vehicle
-    keep the original fine resolution (``size``) while cells further away
-    are progressively coarser.  This dramatically reduces the grid pixel
-    count (and therefore memory + ``weighted_line`` cost) without
-    sacrificing precision near the vehicle.
+    When ``adaptive_resolution=True``, the ``resolution_mode`` selects the
+    coordinate compression strategy:
 
-    Resolution bands (default, configurable via ``res_bands``):
+    **'bands'** (default) — Piecewise-linear bands.
         +-----------+----------+------------------+
         | Distance  | m / pixel| Coverage         |
         +-----------+----------+------------------+
@@ -79,8 +75,17 @@ class InteractionMap(object):
         | 50 –100 m |  4.0     | far periphery    |
         +-----------+----------+------------------+
 
+    **'linear'** — Grid cell size grows linearly with distance:
+        Δs(d) = base + growth_rate · d.  The resulting (x,y)→(row,col)
+        mapping is logarithmic compression:  px(d) = (1/b)·ln(1+b·d/a).
+
+    **'speed'** — Bands + speed-coupled risk inflation.
+        Band radii scale with ego velocity: r_i *= (1 + scale · v_ego).
+        In ``update_map``, risk spreading width and risk value are
+        amplified by the tracked obstacle's instantaneous speed.
+
     When ``adaptive_resolution=False`` the map behaves identically to
-    the original uniform grid.
+    the original uniform grid (``resolution_mode`` is ignored).
     """
 
     def __init__(
@@ -92,6 +97,12 @@ class InteractionMap(object):
             update_length: int,
             adaptive_resolution: bool = True,
             res_bands: list = None,
+            resolution_mode: str = 'bands',
+            linear_growth_rate: float = 0.03,
+            ego_velocity: float = 0.0,
+            speed_band_scale: float = 0.02,
+            speed_risk_factor: float = 0.02,
+            max_distance: float = None,
     ):
         self.anchor_state = anchor_state
         self.size = size                     # finest resolution (m/px)
@@ -99,6 +110,11 @@ class InteractionMap(object):
         self.obs_width = obs_width
         self.adaptive = adaptive_resolution
         self.ego_center = anchor_state.position.copy()
+        self.resolution_mode = resolution_mode
+        self.linear_growth_rate = linear_growth_rate
+        self.ego_velocity = ego_velocity
+        self.speed_band_scale = speed_band_scale
+        self.speed_risk_factor = speed_risk_factor
 
         # ── Resolution bands ──
         # Each entry: (radius_m, meters_per_pixel)
@@ -109,11 +125,21 @@ class InteractionMap(object):
                 (50.0, size * 3),      # 1.5 m/px
                 (100.0, size * 8),     # 4.0 m/px
             ]
-        self.res_bands = res_bands
+        self.res_bands = list(res_bands)  # copy to avoid mutation
+
+        # max_distance: coverage radius (default = last band radius)
+        if max_distance is not None:
+            self.max_distance = max_distance
+        else:
+            self.max_distance = self.res_bands[-1][0]
 
         if self.adaptive:
-            # Build the piecewise-linear mapping tables
-            self._build_nonlinear_mapping()
+            if resolution_mode == 'linear':
+                self._build_linear_mapping()
+            elif resolution_mode == 'speed':
+                self._build_speed_mapping()
+            else:  # 'bands'
+                self._build_nonlinear_mapping()
             grid_side = self._half_pixels * 2
             self.risk_map = np.zeros((grid_side, grid_side), dtype=np.float64)
             self.tree_map = np.zeros((grid_side, grid_side), dtype=np.float64)
@@ -122,7 +148,7 @@ class InteractionMap(object):
             self.visited_map_vertical = np.full((grid_side, grid_side), 0.001, dtype=np.float64)
             self.bev_map = np.zeros((grid_side, grid_side), dtype=bev_map.dtype)
             # length/width in metres that the grid covers
-            self.length = self.res_bands[-1][0] * 2
+            self.length = self.max_distance * 2
             self.width = self.length
         else:
             # Original uniform behaviour
@@ -146,8 +172,6 @@ class InteractionMap(object):
 
     def _build_nonlinear_mapping(self):
         """Pre-compute cumulative pixel offsets at each band boundary."""
-        # _band_cumul_px[i] = total pixels from center to the outer edge of
-        # band i.  Used by _world_to_pixel for fast piecewise‐linear lookup.
         self._band_cumul_px = []
         cumul = 0.0
         prev_r = 0.0
@@ -155,12 +179,49 @@ class InteractionMap(object):
             cumul += (radius_m - prev_r) / mpp
             self._band_cumul_px.append(cumul)
             prev_r = radius_m
-        # half_pixels = pixels from center to outer edge (ceil for safety)
         self._half_pixels = int(math.ceil(cumul)) + 1
 
+    def _build_linear_mapping(self):
+        """Build mapping for linear-growth mode: Δs(d) = a + b·d.
+
+        The forward transform is logarithmic compression:
+            pixel(d) = (1/b)·ln(1 + b·d/a)
+        Inverse:
+            d(pixel) = (a/b)·(exp(b·pixel) − 1)
+        """
+        a = self.size
+        b = self.linear_growth_rate
+        max_d = self.max_distance
+        if b < 1e-12:
+            # Degenerate: growth ≈ 0 → uniform grid
+            self._half_pixels = int(math.ceil(max_d / a)) + 1
+        else:
+            self._half_pixels = int(math.ceil(
+                (1.0 / b) * math.log(1.0 + b * max_d / a))) + 1
+
+    def _build_speed_mapping(self):
+        """Scale band radii by ego velocity, then build bands mapping.
+
+        scale = 1 + speed_band_scale × v_ego
+        Each band radius r_i → r_i × scale (resolution m/px unchanged).
+        This expands coverage at higher speeds while keeping pixel count
+        proportional.
+        """
+        scale = 1.0 + self.speed_band_scale * self.ego_velocity
+        self.res_bands = [(r * scale, mpp) for r, mpp in self.res_bands]
+        self.max_distance = self.res_bands[-1][0]
+        self._build_nonlinear_mapping()
+
+    # ── Dispatch helpers ──────────────────────────────────────────────
+
     def _coord_to_pixel_1d(self, d: float) -> int:
-        """Map a signed distance (m) from ego center to pixel offset from
-        grid center using the piecewise-linear compression."""
+        """Map signed distance (m) from ego → pixel index."""
+        if self.resolution_mode == 'linear':
+            return self._coord_to_pixel_linear_1d(d)
+        return self._coord_to_pixel_bands_1d(d)
+
+    def _coord_to_pixel_bands_1d(self, d: float) -> int:
+        """Piecewise-linear band compression."""
         sign = 1 if d >= 0 else -1
         ad = abs(d)
         prev_r = 0.0
@@ -175,9 +236,27 @@ class InteractionMap(object):
         cumul += (ad - prev_r) / self.res_bands[-1][1]
         return int(sign * cumul + self._half_pixels)
 
+    def _coord_to_pixel_linear_1d(self, d: float) -> int:
+        """Logarithmic compression: Δs(d) = a + b·d."""
+        sign = 1 if d >= 0 else -1
+        ad = abs(d)
+        a = self.size
+        b = self.linear_growth_rate
+        if b < 1e-12:
+            px = ad / a
+        else:
+            px = (1.0 / b) * math.log(1.0 + b * ad / a)
+        return int(sign * px + self._half_pixels)
+
     def _pixel_to_coord_1d(self, px: int) -> float:
-        """Inverse: pixel offset from grid center → signed distance in m."""
-        p = px - self._half_pixels  # signed pixel from center
+        """Inverse: pixel index → signed distance in m."""
+        if self.resolution_mode == 'linear':
+            return self._pixel_to_coord_linear_1d(px)
+        return self._pixel_to_coord_bands_1d(px)
+
+    def _pixel_to_coord_bands_1d(self, px: int) -> float:
+        """Inverse for piecewise-linear bands."""
+        p = px - self._half_pixels
         sign = 1 if p >= 0 else -1
         ap = abs(p)
         prev_r = 0.0
@@ -190,8 +269,25 @@ class InteractionMap(object):
             prev_r = radius_m
         return sign * (prev_r + (ap - cumul) * self.res_bands[-1][1])
 
+    def _pixel_to_coord_linear_1d(self, px: int) -> float:
+        """Inverse for linear-growth mode: d = (a/b)·(exp(b·p) − 1)."""
+        p = px - self._half_pixels
+        sign = 1 if p >= 0 else -1
+        ap = abs(p)
+        a = self.size
+        b = self.linear_growth_rate
+        if b < 1e-12:
+            return sign * ap * a
+        return sign * (a / b) * (math.exp(b * ap) - 1.0)
+
     def _mpp_at_pixel_1d(self, px: int) -> float:
-        """Return the meters-per-pixel at a given pixel offset."""
+        """Return the metres-per-pixel at a given pixel index."""
+        if self.resolution_mode == 'linear':
+            return self._mpp_at_pixel_linear_1d(px)
+        return self._mpp_at_pixel_bands_1d(px)
+
+    def _mpp_at_pixel_bands_1d(self, px: int) -> float:
+        """Metres-per-pixel for piecewise-linear bands."""
         p = abs(px - self._half_pixels)
         cumul = 0.0
         prev_r = 0.0
@@ -202,6 +298,11 @@ class InteractionMap(object):
             cumul += band_px
             prev_r = radius_m
         return self.res_bands[-1][1]
+
+    def _mpp_at_pixel_linear_1d(self, px: int) -> float:
+        """Metres-per-pixel for linear-growth mode: mpp = a + b·|d|."""
+        d = abs(self._pixel_to_coord_linear_1d(px))
+        return self.size + self.linear_growth_rate * d
 
     def update_map(
             self,
@@ -220,10 +321,21 @@ class InteractionMap(object):
         grid_risk = risk_value
         grid_max = self.risk_map.shape[0]
         risk_after_collision = []
+        is_speed_mode = (self.resolution_mode == 'speed')
         for i in range(update_range, 0, -1):
             p1 = trajectory.get_global_state(i).position
             p2 = trajectory.get_global_state(i-1).position
             v1 = trajectory.get_global_state(i).velocity
+
+            # Speed-coupled risk amplification
+            if is_speed_mode:
+                speed_risk_mult = 1.0 + self.speed_risk_factor * v1
+                speed_w_bonus = max(0.0, v1 / 5.0)  # +1 px width per 5 m/s
+            else:
+                speed_risk_mult = 1.0
+                speed_w_bonus = 0.0
+            effective_risk = grid_risk * speed_risk_mult
+
             if self.in_map_check(p1) and self.in_map_check(p2):
 
                 pixel_position_1 = self.position_to_pixel(p1)
@@ -232,30 +344,30 @@ class InteractionMap(object):
                 if pixel_position_1 == pixel_position_2:
                     r, c = pixel_position_1
                     if 0 <= r < grid_max and 0 <= c < grid_max:
-                        self.risk_map[r, c] += grid_risk
+                        self.risk_map[r, c] += effective_risk
                         self.visited_map[r, c] += 1
                 else:
                     if trajectory.uncertainty_list is not None and grid_risk > 0.1:
                         unc_idx = min(i - 1, len(trajectory.uncertainty_list) - 1)
-                        rr, cc, vals = weighted_line(*pixel_position_1, *pixel_position_2, w=4+self.confidence_width(trajectory.uncertainty_list[unc_idx]),
+                        rr, cc, vals = weighted_line(*pixel_position_1, *pixel_position_2, w=4+self.confidence_width(trajectory.uncertainty_list[unc_idx]) + speed_w_bonus,
                                                      rmin=0, rmax=grid_max)
                     else:
-                        rr, cc, vals = weighted_line(*pixel_position_1, *pixel_position_2, w=5, rmin=0, rmax=grid_max)
+                        rr, cc, vals = weighted_line(*pixel_position_1, *pixel_position_2, w=5 + speed_w_bonus, rmin=0, rmax=grid_max)
 
                     # Clamp columns to valid range
                     mask = (cc >= 0) & (cc < grid_max)
                     rr, cc, vals = rr[mask], cc[mask], vals[mask]
 
-                    self.risk_map[rr, cc] += grid_risk * vals
+                    self.risk_map[rr, cc] += effective_risk * vals
                     self.visited_map[rr, cc] += 1
 
                 if draw_tree_ax is not None:
                     draw_tree_ax.plot([p1[0], p2[0]], [p1[1], p2[1]], c=self.cmap(grid_risk - 0.001 if grid_risk == 1 else grid_risk), linewidth=2.5, zorder=25)
                 if trajectory.collision_step != -1 and i > trajectory.collision_step:
-                    risk_after_collision.append(grid_risk)
+                    risk_after_collision.append(effective_risk)
                     grid_risk = grid_risk
                 else:
-                    risk_after_collision.append(grid_risk)
+                    risk_after_collision.append(effective_risk)
                     grid_risk = grid_risk * max(0.8 - v1 / 20, 0.2)
         return sum(risk_after_collision) / update_range if update_range > 0 else 0
 
@@ -309,8 +421,7 @@ class InteractionMap(object):
     def in_map_check(self, position):
         if self.adaptive:
             d = position - self.ego_center
-            max_r = self.res_bands[-1][0]
-            return abs(d[0]) < max_r and abs(d[1]) < max_r
+            return abs(d[0]) < self.max_distance and abs(d[1]) < self.max_distance
         diff = position - self.origin
         if max(diff) >= self.length or min(diff) < 0:
             return False
@@ -319,8 +430,7 @@ class InteractionMap(object):
 
     def in_map_check_rel(self, rel_position):
         if self.adaptive:
-            max_r = self.res_bands[-1][0]
-            return abs(rel_position[0]) < max_r and abs(rel_position[1]) < max_r
+            return abs(rel_position[0]) < self.max_distance and abs(rel_position[1]) < self.max_distance
         if max(abs(rel_position)) > self.length / 2:
             return False
         else:

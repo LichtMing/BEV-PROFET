@@ -209,9 +209,11 @@ In `frenet_planner.py` `_step_planner()`, figures are only generated when **all*
 
 ## InteractionMap Adaptive Non-Uniform Resolution
 
-`InteractionMap` supports an optional `adaptive_resolution=True` mode (default on) that uses a piecewise-linear coordinate compression around the ego vehicle. Grid cells near ego keep the original 0.5 m/pixel resolution; cells further away become progressively coarser via the compression function.
+`InteractionMap` supports an optional `adaptive_resolution=True` mode (default on) with three selectable `resolution_mode` strategies. When `adaptive_resolution=False`, the map uses the original uniform 400×400 grid regardless of mode.
 
-### Resolution Bands (default)
+### Resolution Modes
+
+#### `'bands'` — Piecewise-linear bands (default)
 
 | Distance from ego | Resolution | Pixel ↔ m | Single-axis coverage |
 |---|---|---|---|
@@ -219,28 +221,97 @@ In `frenet_planner.py` `_step_planner()`, figures are only generated when **all*
 | 20 – 50 m | 1.5 m/px | 0.67 px/m | ±20 px |
 | 50 – 100 m | 4.0 m/px | 0.25 px/m | ±12.5 px |
 
-Total grid: **148 × 148 = 21,904 pixels** vs original 400 × 400 = 160,000 (**7.3× compression**).
+Total grid: **148 × 148 = 21,904 pixels** (7.3× compression). Configurable via `res_bands` parameter.
 
-Configurable via `res_bands` parameter: `[(radius_m, meters_per_pixel), ...]`.
-
-### Coordinate Transform
-
-The `position_to_pixel()` method applies the piecewise-linear compression independently on each axis:
+Coordinate transform (piecewise-linear, applied per axis):
 ```
-d = position - ego_center           # signed distance from ego
-|d| < 20m  →  pixel_offset = d / 0.5     (fine, same as original)
-20 ≤ |d| < 50m  →  pixel_offset = 40 + (|d| - 20) / 1.5  (mid)
-|d| ≥ 50m  →  pixel_offset = 60 + (|d| - 50) / 4.0  (coarse)
+d = position - ego_center
+|d| < 20m  →  pixel_offset = d / 0.5
+20 ≤ |d| < 50m  →  pixel_offset = 40 + (|d| - 20) / 1.5
+|d| ≥ 50m  →  pixel_offset = 60 + (|d| - 50) / 4.0
 ```
-`pixel_to_position()` is the exact inverse.  All existing methods (`update_map`, `sum_traj_risk`, `draw_map`, `in_map_check`) are updated to use the non-linear mapping when `adaptive=True`, with bounds-checking on array access. `weighted_line`'s `rmax` parameter is set dynamically to the actual grid side length.
 
-### Accuracy
+#### `'linear'` — Continuous logarithmic compression
 
-Near ego (d < 20m): **0.00m** round-trip error (identical to original). Mid-range (d ≈ 32m): ~0.5m. Far (d ≈ 100m): ~2.0m. Since risk accumulation at far distances is inherently uncertain, this precision loss is acceptable.
+Grid cell size grows linearly with distance: **Δs(d) = a + b·d** where `a = size` (0.5 m/px) and `b = linear_growth_rate` (default 0.03).
 
-### Disabling
+The resulting coordinate transform is logarithmic:
+```
+pixel(d)  = (1/b) · ln(1 + b·d/a)        # forward
+d(pixel)  = (a/b) · (exp(b·pixel) - 1)    # inverse
+mpp(d)    = a + b·d                        # metres-per-pixel at distance d
+mpp(pixel)= a · exp(b·pixel)              # mpp in pixel space
+```
 
-Pass `adaptive_resolution=False` to `InteractionMap(...)` to revert to the original uniform 400×400 grid.
+With default parameters (a=0.5, b=0.03, max_d=100m): total grid **132 × 132 = 17,424 pixels** (9.2× compression).
+
+| Distance | Δs (m/px) | Pixel offset |
+|---|---|---|
+| 0 m | 0.50 | 0 |
+| 10 m | 0.80 | ±15 |
+| 20 m | 1.10 | ±26 |
+| 50 m | 2.00 | ±46 |
+| 100 m | 3.50 | ±64 |
+
+Near-ego round-trip error: **0.00m**. Far (100m): ~3.0m.
+
+#### `'speed'` — Speed-coupled bands + risk inflation
+
+Combines band-based grid with ego-speed-dependent scaling:
+1. **Band radii scale with ego velocity**: `r_i → r_i × (1 + speed_band_scale × v_ego)`. This expands coverage at higher speeds.
+2. **Risk amplification in `update_map`**: `effective_risk = grid_risk × (1 + speed_risk_factor × v_obstacle)`. Faster obstacles deposit more risk.
+3. **Wider risk spreading**: `weighted_line` width += `v_obstacle / 5.0` pixels. Faster obstacles paint wider risk corridors.
+
+Grid sizes at various ego speeds (default params: `speed_band_scale=0.02`):
+
+| Ego speed | Scale | Band radii | Grid size | Compression |
+|---|---|---|---|---|
+| 0 m/s | 1.0× | 20/50/100 m | 148×148 | 7.3× |
+| 10 m/s | 1.2× | 24/60/120 m | 176×176 | 5.2× |
+| 20 m/s | 1.4× | 28/70/140 m | 206×206 | 3.8× |
+| 40 m/s | 1.8× | 36/90/180 m | 262×262 | 2.3× |
+
+### Configuration (`planning_fast.json`)
+
+```json
+"active_learning": {
+  "resolution_mode": "bands",
+  "linear_growth_rate": 0.03,
+  "speed_band_scale": 0.02,
+  "speed_risk_factor": 0.02
+}
+```
+
+- `resolution_mode`: `"bands"` | `"linear"` | `"speed"` — selects the coordinate compression strategy.
+- `linear_growth_rate`: For `"linear"` mode. Controls how fast cell size grows with distance. Higher → more aggressive compression. Default `0.03`.
+- `speed_band_scale`: For `"speed"` mode. How much band radii scale per m/s of ego velocity. Default `0.02`.
+- `speed_risk_factor`: For `"speed"` mode. Risk multiplier per m/s of obstacle velocity in `update_map`. Default `0.02`.
+
+### Accuracy (all modes)
+
+Near ego (d < 20m): **0.00m** round-trip error (all modes identical). Far (d ≈ 100m): bands ~2.0m, linear ~3.0m, speed same as bands.
+
+### Usage — Switching Resolution Modes
+
+Only one JSON field needs to change in `planner/Frenet/configs/planning_fast.json` (inside the `"active_learning"` block):
+
+```jsonc
+// ── Mode 1: Piecewise-linear bands (default) ──
+"resolution_mode": "bands"
+
+// ── Mode 2: Continuous logarithmic compression ──
+"resolution_mode": "linear",
+"linear_growth_rate": 0.03       // b in Δs = 0.5 + b·d; larger → more aggressive
+
+// ── Mode 3: Speed-coupled bands + risk inflation ──
+"resolution_mode": "speed",
+"speed_band_scale": 0.02,        // band radii ×(1 + scale·v_ego)
+"speed_risk_factor": 0.02        // risk ×(1 + factor·v_obstacle)
+```
+
+All other `active_learning` fields remain unchanged. Parameters that are irrelevant to the chosen mode are simply ignored (e.g. `linear_growth_rate` is ignored when `resolution_mode` is `"bands"` or `"speed"`).
+
+To disable adaptive resolution entirely and revert to the original uniform 400×400 grid, set `adaptive_resolution=False` at the code level in `InteractionMap(...)`.
 
 ## Visualization Architecture (active_learning mode)
 
@@ -298,7 +369,7 @@ plt.close(fig)                ← releases figure memory
 | `planner/Frenet/utils/prediction_helpers.py` | `collision_checker_prediction`: clamp `end_time_step` to `len(pred_traj)`, use `len(x)` for `traj_length` |
 | `planner/Frenet/utils/traj_evaluate.py` | `query_time` clamping to prevent IndexError |
 | `commonroad/visualization/scenario.py` (site-packages) | Removed `transOffset=ax.transData` from 4 `PolyCollection` calls |
-| `planner/Frenet/configs/planning_fast.json` | `store_interval` 2.0→0.5; added `bev_prob_dir`, `bev_weight` |
+| `planner/Frenet/configs/planning_fast.json` | `store_interval` 2.0→0.5; added `bev_prob_dir`, `bev_weight`, `resolution_mode`, `linear_growth_rate`, `speed_band_scale`, `speed_risk_factor` |
 
 ## Key Dependencies
 

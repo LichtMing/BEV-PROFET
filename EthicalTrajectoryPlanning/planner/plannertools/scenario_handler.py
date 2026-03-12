@@ -176,8 +176,10 @@ class ScenarioHandler:
             if len(self.agent_list) != 0:
                 traj_length = self.agent_list[0].planner.traj_length
                 self.traverse_future_steps = traj_length * 3
-            self.search_traj_logger = TrajLogger(log_prefix="scenario search tree traj logger", points_num=traj_length * 3)
-            self.ground_truth_traj_logger = TrajLogger(log_prefix="scenario ground truth traj logger", points_num=traj_length * 3)
+            self.search_traj_logger = TrajLogger(log_prefix="scenario search tree traj logger", points_num=traj_length * 3,
+                                                  save_dir=os.path.join("saved_fig", self.scenario.benchmark_id))
+            self.ground_truth_traj_logger = TrajLogger(log_prefix="scenario ground truth traj logger", points_num=traj_length * 3,
+                                                       save_dir=os.path.join("saved_fig", self.scenario.benchmark_id))
             for dynamic_obstacle in self.scenario.dynamic_obstacles:
                 for s in dynamic_obstacle.prediction.trajectory.state_list:
                     if (

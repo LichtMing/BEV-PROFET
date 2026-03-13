@@ -1,4 +1,5 @@
 __pycache__/
+.github/
 bev_v2x_transformer/All_Predictions_Result/
 bev_v2x_transformer/BEVData_01/
 bev_v2x_transformer/BEVImgLabel_01/

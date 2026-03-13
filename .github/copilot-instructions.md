@@ -206,6 +206,15 @@ In `frenet_planner.py` `_step_planner()`, figures are only generated when **all*
     **Fixed**: Store `self.original_scenario = copy.deepcopy(scenario)` at planner initialization (before any truncation). Use `original_scenario` (with full untruncated trajectories) for: WaleNet `.step()`, ground truth fallback `get_ground_truth_prediction()`, and `get_orientation_velocity_and_shape_of_prediction()`. The truncated `self.scenario` is still used for `get_obstacles_in_radius()` (current-time visibility check) and `get_dyn_and_stat_obstacles()`.
 16. **`collision_checker_prediction` IndexError on prediction array slicing**: The formula `traj_length = (end_time_step - start_time_step) / time_interval` computes length mathematically, but the actual numpy slice `pred_traj[:, 0][start:end:step]` gets truncated when `end_time_step > len(pred_traj)`. This causes IndexError in the list comprehension `[[x[i], y[i], pred_orientation[i]] for i in range(int(traj_length))]`. **Fixed**: clamp `end_time_step = min(end_time_step, len(pred_traj))` before slicing, skip if `end <= start`, use `traj_length = len(x)` (actual sliced length) instead of the formula.
 17. **`InteractionMap.update_map` uncertainty_list index OOB**: `trajectory.uncertainty_list` (from collision covariance slice) may be shorter than `update_range` (=17). Accessing `uncertainty_list[i-1]` with `i` up to 17 causes IndexError. **Fixed**: clamped index to `min(i-1, len(trajectory.uncertainty_list)-1)`.
+18. **`avg_thw` stayed at -1 / unstable after re-enabling THW**:
+  - **Root cause (historical)**: In `planner/Frenet/utils/traj_evaluate.py`, `thw` was initialized as `-1` but the legacy THW computation block was commented. In addition, THW logging was gated by `if eval_res["ttc"] != -1`, which could suppress valid THW samples.
+  - **Observed issue after first re-enable attempt**: A terminal-time formula (`thw = distance / (traj[-1][4] + 0.01)`) at `query_time = time_step + len(traj)` produced inflated THW in search-tree mode (very small terminal speed causes large values).
+  - **Applied fix (minimal and comment-aligned)**: Reused the original commented sampling logic: evaluate every 5th trajectory point (`time_step + i + 1`), compute `thw = distance / (state[4] + 0.01)` and `ttc = distance / (approaching_rate + 0.01)`, clamp with historical bounds (`ttc` to `[-10, 10]`, `thw` to `[0, 30]`), and aggregate by mean.
+  - **Logging change**: THW is recorded independently with `if eval_res["thw"] != -1` (no longer blocked by TTC availability).
+  - **Validation** (`USA_Intersection-1_7_T-1.xml`):
+    - Before stabilization: scenario search-tree `avg_thw` could spike to `73.23`.
+    - After stabilization: scenario search-tree `avg_thw` reduced to `8.04` (same scenario rerun), indicating outlier suppression worked.
+  - **Important semantic note**: Current THW is still a gap/speed surrogate, not strict "time difference at the same passed point" headway. A strict definition requires point-crossing event matching for ego/leader.
 
 ## InteractionMap Adaptive Non-Uniform Resolution
 

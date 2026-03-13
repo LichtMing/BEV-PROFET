@@ -56,74 +56,51 @@ def traj_metric(traj):
     return s_traj, d_sum, v_avg, a_sq_inter
 
 def calc_eval_values(scenario: Scenario, ego_id, time_step, traj, reference_spline):
-    # ttc_list = []
-    # thw_list = []
+    ttc_list = []
+    thw_list = []
     ttc = -1
     thw = -1
-    # for i, state in enumerate(traj):
-    #     if i % 5 != 0:
-    #         continue
-    #     if (
-    #             len(
-    #                 scenario.lanelet_network.find_lanelet_by_position(
-    #                     [np.asarray([state[0], state[1]])]
-    #                 )[0]
-    #             )
-    #             > 0
-    #     ):
-    #         lanelet_id = (
-    #             scenario.lanelet_network.find_lanelet_by_position(
-    #                 [np.asarray([state[0], state[1]])]
-    #             )[0][0]
-    #         )
-    #     else:
-    #         continue
-    #
-    #     leader_id, distance, approaching_rate = get_leader_on_lanelet(scenario, ego_id, lanelet_id, time_step + i + 1)
-    #     leader_pos = scenario.obstacle_by_id(leader_id).state_at_time_step(time_step+len(traj))
-    #     if leader_id == None:
-    #         continue
-    #     ttc = distance / (approaching_rate + 0.01)
-    #     thw = distance / (state[4] + 0.01)
-    #     ttc_list.append(ttc)
-    #     thw_list.append(thw)
-    #
-    # if len(ttc_list) == 0:
-    #     return {"ttc": None, "thw": None}
-    # ttc_list = np.clip(ttc_list, -10, 10)
-    # thw_list = np.clip(thw_list, 0, 30)
-    ini_state = traj[0]
-    if ego_id != 206 and ego_id != 198:
+    ego_obs = scenario.obstacle_by_id(ego_id)
+    max_ts = None
+    if ego_obs is not None and ego_obs.prediction is not None:
+        max_ts = ego_obs.prediction.trajectory.state_list[-1].time_step
+
+    for i, state in enumerate(traj):
+        if i % 5 != 0:
+            continue
         if (
                 len(
                     scenario.lanelet_network.find_lanelet_by_position(
-                        [np.asarray([ini_state[0], ini_state[1]])]
+                        [np.asarray([state[0], state[1]])]
                     )[0]
                 )
                 > 0
         ):
             lanelet_id = (
                 scenario.lanelet_network.find_lanelet_by_position(
-                    [np.asarray([ini_state[0], ini_state[1]])]
+                    [np.asarray([state[0], state[1]])]
                 )[0][0]
             )
-            query_time = time_step + len(traj)
-            # Clamp query time to ego vehicle's trajectory range to avoid IndexError
-            ego_obs = scenario.obstacle_by_id(ego_id)
-            if ego_obs is not None and ego_obs.prediction is not None:
-                max_ts = ego_obs.prediction.trajectory.state_list[-1].time_step
-                query_time = min(query_time, max_ts)
-            leader_id, distance, approaching_rate = get_leader_on_lanelet(scenario, ego_id, lanelet_id, query_time)
-            if leader_id is not None:
-                leader_state = scenario.obstacle_by_id(leader_id).prediction.trajectory.state_at_time_step(query_time)
-                s, _, _, _ = reference_spline.cartesian_to_frenet(
-                        leader_state.position, leader_state.velocity, leader_state.orientation
-                    )
-                for i, point in enumerate(reversed(traj)):
-                    if s - 6 > point[2]:
-                        if i != 0:
-                            ttc = (len(traj) - i) / 10.0
-                        break
+        else:
+            continue
+
+        query_time = time_step + i + 1
+        if max_ts is not None:
+            query_time = min(query_time, max_ts)
+        leader_id, distance, approaching_rate = get_leader_on_lanelet(scenario, ego_id, lanelet_id, query_time)
+        if leader_id is None:
+            continue
+        ttc = distance / (approaching_rate + 0.01)
+        thw = distance / (state[4] + 0.01)
+        ttc_list.append(ttc)
+        thw_list.append(thw)
+
+    if len(ttc_list) > 0:
+        ttc_list = np.clip(ttc_list, -10, 10)
+        ttc = float(np.mean(ttc_list))
+    if len(thw_list) > 0:
+        thw_list = np.clip(thw_list, 0, 30)
+        thw = float(np.mean(thw_list))
     return {"ttc": ttc, "thw": thw}
 
 class TrajLogger(object):
@@ -155,6 +132,7 @@ class TrajLogger(object):
         self.db_t_evaluation.append(duration_evaluation)
         if eval_res["ttc"] != -1:
             self.db_ttc.append(eval_res["ttc"])
+        if eval_res["thw"] != -1:
             self.db_thw.append(eval_res["thw"])
         self.db_length += 1
         print("vehicle {} at {}'s traj from {} : s {}, v {}, a {}, r {}, ttc {}, thw {}".format(ego_id, time_step, self.log_prefix,

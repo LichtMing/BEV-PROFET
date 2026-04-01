@@ -27,7 +27,7 @@ saved_fig/
 *.gif
 *.csv
 *.jpg
-
+*.log
 out/
 
 planner/GlobalPath/results/

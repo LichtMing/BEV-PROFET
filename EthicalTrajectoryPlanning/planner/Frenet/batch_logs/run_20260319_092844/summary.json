@@ -1,0 +1,10 @@
+{
+  "total": 2,
+  "success": 0,
+  "failed": 0,
+  "timeout": 0,
+  "skipped": 2,
+  "total_duration_sec": 0.0,
+  "avg_duration_sec": 0.0,
+  "failed_or_timeout_ids": []
+}

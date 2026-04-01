@@ -49,8 +49,8 @@ class ScenarioEvaluator(ScenarioHandler):
                     from commonroad.common.file_writer import OverwriteExistingFile
                     from commonroad.scenario.scenario import Tag
 
-                    author = 'Qiyuan Liu'
-                    affiliation = 'Tsinghua University'
+                    author = 'Hongen Wang'
+                    affiliation = 'BME'
                     source = ''
                     tags = {Tag.CRITICAL, Tag.INTERSTATE}
 

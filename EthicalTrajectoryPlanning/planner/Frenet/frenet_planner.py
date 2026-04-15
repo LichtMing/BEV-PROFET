@@ -363,6 +363,49 @@ class FrenetPlanner(Planner):
         except ExecutionTimeoutError:
             raise TimeoutError
 
+    def _extract_speed_series(self, states):
+        """Convert a list of states to time-speed arrays in SI units."""
+        times_s = []
+        speeds_mps = []
+        for state in states:
+            if not hasattr(state, "time_step") or not hasattr(state, "velocity"):
+                continue
+            try:
+                times_s.append(float(state.time_step) * float(self.scenario.dt))
+                speeds_mps.append(float(state.velocity))
+            except (TypeError, ValueError):
+                continue
+        return times_s, speeds_mps
+
+    def save_ego_speed_curve(self, time_step: int, suffix: str = "speed_curve"):
+        """Save ego speed curve under saved_fig/<scenario>/ for the current ego."""
+        save_dir = os.path.join("../../saved_fig", self.scenario.benchmark_id)
+        os.makedirs(save_dir, exist_ok=True)
+
+        driven_t, driven_v = self._extract_speed_series(self.driven_traj)
+        if len(driven_t) == 0:
+            return
+
+        fig, ax = plt.subplots(figsize=(8, 3.5))
+        ax.plot(driven_t, driven_v, color="#d62728", linewidth=2.0, label="ego driven")
+
+        if self.active_learning and hasattr(self, "reference_traj"):
+            ref_t, ref_v = self._extract_speed_series(self.reference_traj.state_list)
+            if len(ref_t) > 0:
+                ax.plot(ref_t, ref_v, color="#1f77b4", linewidth=1.5, linestyle="--", label="ego reference")
+
+        ax.scatter([driven_t[-1]], [driven_v[-1]], color="#d62728", s=18)
+        ax.set_xlabel("Time [s]")
+        ax.set_ylabel("Speed [m/s]")
+        ax.set_title(f"Ego {self.ego_id} Speed Curve (t={time_step})")
+        ax.grid(True, linestyle=":", alpha=0.35)
+        ax.legend(loc="best")
+        fig.tight_layout()
+
+        save_name = f"{self.ego_id}_{time_step}_{suffix}.png"
+        fig.savefig(os.path.join(save_dir, save_name), dpi=300)
+        plt.close(fig)
+
     def _step_planner(self):
         """Frenet Planner step function.
 
@@ -624,6 +667,8 @@ class FrenetPlanner(Planner):
                     )
                     plt.close('all')
 
+                    self.save_ego_speed_curve(time_step=self.ego_state.time_step)
+
                     self.saved_maps.append(self.interaction_maps)
                     for index, map in enumerate(self.interaction_maps):
                         best_traj_seg = best_traj[search_length * index: search_length * (index + 1)]
@@ -684,8 +729,9 @@ class FrenetPlanner(Planner):
                     # if self.prepare_label:
                     #     for i, map in enumerate(self.interaction_maps):
             elif self.time_step == self.final_step - self.max_exploration_time / self.frenet_parameters["dt"]:
-                    self.search_traj_logger.log_average_traj_data()
-                    self.gt_traj_logger.log_average_traj_data()
+                self.save_ego_speed_curve(time_step=self.ego_state.time_step, suffix="speed_curve_final")
+                self.search_traj_logger.log_average_traj_data()
+                self.gt_traj_logger.log_average_traj_data()
             self.exec_timer.stop_timer("simulation/total")
 
             return

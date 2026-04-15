@@ -41,7 +41,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--start-id",
         type=int,
-        default=16,
+        default=1,
         help="Start scenario id (default: 16, because 1-15 are already done)",
     )
     parser.add_argument(

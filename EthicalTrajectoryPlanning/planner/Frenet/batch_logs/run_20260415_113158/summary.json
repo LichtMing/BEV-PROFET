@@ -1,0 +1,10 @@
+{
+  "total": 22,
+  "success": 22,
+  "failed": 0,
+  "timeout": 0,
+  "skipped": 0,
+  "total_duration_sec": 7626.438,
+  "avg_duration_sec": 346.656,
+  "failed_or_timeout_ids": []
+}

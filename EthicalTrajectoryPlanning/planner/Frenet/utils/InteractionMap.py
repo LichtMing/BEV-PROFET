@@ -310,6 +310,7 @@ class InteractionMap(object):
             risk_value: float,
             update_range: float = None,
             draw_tree_ax: matplotlib.pyplot.Axes = None,
+            use_bev_weight: bool = True,
     ):
         # if the collision position is out of map, the vehicle cannot detect this risk
 
@@ -318,7 +319,17 @@ class InteractionMap(object):
                 risk_value = 0
         if update_range is None:
             update_range = self.update_length
-        grid_risk = risk_value
+
+        # BEV weight integration: only apply when BEV data is available (probability < 1.0)
+        if (use_bev_weight and
+            hasattr(trajectory, 'bev_probability') and
+            trajectory.bev_probability < 1.0):
+            # Weighted average: 0.7 × collision_risk + 0.3 × BEV probability
+            # When BEV data is available, blend both signals
+            grid_risk = (0.7 * risk_value + 0.3 * trajectory.bev_probability)
+        else:
+            # BEV data missing or disabled: use original risk value
+            grid_risk = risk_value
         grid_max = self.risk_map.shape[0]
         risk_after_collision = []
         is_speed_mode = (self.resolution_mode == 'speed')

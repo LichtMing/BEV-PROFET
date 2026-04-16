@@ -111,6 +111,10 @@ class FrenetTrajectory:
         # Uncertainty
         self.uncertainty_list = None
 
+        # BEV weight for risk integration
+        self.bev_probability = 1.0  # Default: full confidence (no BEV data)
+        self.bev_uncertainty = 0.0  # Standard deviation/uncertainty measure
+
         self.target_behavior = target_behavior
 
     def get_global_state(self, item):
@@ -125,6 +129,16 @@ class FrenetTrajectory:
 
     def __len__(self):
         return len(self.t)
+
+    def set_bev_weight(self, probability: float, uncertainty: float = 0.0):
+        """Set BEV prediction weight for this trajectory.
+
+        Args:
+            probability (float): BEV collision probability [0, 1]. 1.0 means no BEV data.
+            uncertainty (float): BEV prediction uncertainty [0, 1]. Default 0.0.
+        """
+        self.bev_probability = np.clip(probability, 0.0, 1.0)
+        self.bev_uncertainty = np.clip(uncertainty, 0.0, 1.0)
 
 def check_curvature_of_global_path(
     global_path: np.ndarray, planning_problem, vehicle_params, ego_state

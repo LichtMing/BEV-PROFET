@@ -156,6 +156,7 @@ class FrenetPlanner(Planner):
                 if self.active_learning:
                     # Store active_learning config for InteractionMap parameters
                     self.planning_config = settings.get("active_learning", {}) if settings else {}
+                    self.log_bev_prob_stats = self.planning_config.get("log_bev_prob_stats", False)
                     # Store original scenario with full trajectories for prediction
                     # update_scenario() truncates all agent trajectories during simulation,
                     # which makes WaleNet/ground_truth prediction unable to see future positions.
@@ -405,6 +406,46 @@ class FrenetPlanner(Planner):
         save_name = f"{self.ego_id}_{time_step}_{suffix}.png"
         fig.savefig(os.path.join(save_dir, save_name), dpi=300)
         plt.close(fig)
+
+    def _compute_traj_max_bev_prob(self, traj):
+        """Compute max BEV probability along one trajectory.
+
+        Requires BEVProbLoader timestamp to be set by caller.
+        Returns None when BEV loader/data is unavailable.
+        """
+        if (not hasattr(self, "bev_prob_loader") or
+                self.bev_prob_loader is None or
+                not self.bev_prob_loader.is_available):
+            return None
+
+        max_bev_prob = 0.0
+        dt_step = self.frenet_parameters["dt"]
+        for idx in range(1, len(traj.x)):
+            future_t = idx * dt_step
+            if future_t <= 1.5:
+                t_idx = 0
+            elif future_t <= 2.5:
+                t_idx = 1
+            else:
+                t_idx = 2
+
+            prob = self.bev_prob_loader.query_prob(traj.x[idx], traj.y[idx], t_idx)
+            if prob > max_bev_prob:
+                max_bev_prob = prob
+
+        return max_bev_prob
+
+    def _attach_bev_prob_to_traj(self, traj):
+        """Attach BEV probability to trajectory for risk-map fusion.
+
+        Returns the attached max probability, or None if BEV is unavailable.
+        """
+        max_bev_prob = self._compute_traj_max_bev_prob(traj)
+        if max_bev_prob is None:
+            return None
+
+        traj.set_bev_weight(probability=max_bev_prob, uncertainty=0.0)
+        return max_bev_prob
 
     def _step_planner(self):
         """Frenet Planner step function.
@@ -886,22 +927,9 @@ class FrenetPlanner(Planner):
             if hasattr(self, 'bev_prob_loader') and self.bev_prob_loader is not None and self.bev_prob_loader.is_available:
                 self.bev_prob_loader.set_time_step(self.time_step)
                 for fp in ft_list_valid:
-                    max_bev_prob = 0.0
-                    dt_step = self.frenet_parameters["dt"]
-                    for idx in range(1, len(fp.x)):
-                        future_t = idx * dt_step
-                        if future_t <= 1.5:
-                            t_idx = 0
-                        elif future_t <= 2.5:
-                            t_idx = 1
-                        elif future_t <= 3.5:
-                            t_idx = 2
-                        else:
-                            t_idx = 2
-                        p = self.bev_prob_loader.query_prob(fp.x[idx], fp.y[idx], t_idx)
-                        if p > max_bev_prob:
-                            max_bev_prob = p
-                    fp.cost += max_bev_prob * self.bev_prob_loader.bev_weight
+                    max_bev_prob = self._attach_bev_prob_to_traj(fp)
+                    if max_bev_prob is not None:
+                        fp.cost += max_bev_prob * self.bev_prob_loader.bev_weight
 
             with self.exec_timer.time_with_cm(
                     "simulation/sort trajectories/sort list by costs"
@@ -1094,6 +1122,7 @@ class FrenetPlanner(Planner):
                 self.interaction_maps[depth].update_map(trajectory=ft,
                                                         risk_value=0,
                                                         update_range=ft.collision_step - 1,
+                                                        use_bev_weight=True,
                                                         # draw_tree_ax=tree_ax,
                                                         )
                 if trajectory_collect_tree is not None:
@@ -1106,6 +1135,7 @@ class FrenetPlanner(Planner):
 
                 ft_risk = self.interaction_maps[depth].update_map(trajectory=ft,
                                                             risk_value=0.999,
+                                                            use_bev_weight=True,
                                                             # draw_tree_ax=tree_ax
                                                         )
                 collision_risk_sum += ft_risk
@@ -1122,6 +1152,7 @@ class FrenetPlanner(Planner):
 
                 self.interaction_maps[depth].update_map(trajectory=ft,
                                                         risk_value=0,
+                                                        use_bev_weight=True,
                                                         # draw_tree_ax=tree_ax,
                                                          )
 
@@ -1152,7 +1183,8 @@ class FrenetPlanner(Planner):
                 self.interaction_maps[depth].update_map(trajectory=ft,
                                                         risk_value=0.999,
                                                         update_range=ft.collision_step - 1,
-                                                        draw_tree_ax=tree_ax if depth == 1 else None
+                                                        draw_tree_ax=tree_ax if depth == 1 else None,
+                                                        use_bev_weight=True,
                                                                 )
                 if trajectory_collect_tree is not None:
                     for i, (d_tree, v_tree) in enumerate(trajectory_collect_tree):
@@ -1164,7 +1196,8 @@ class FrenetPlanner(Planner):
                 print("coll", parent_behavior_path, ft.target_behavior, ft.s[0], ft.s[-1])
                 ft_risk = self.interaction_maps[depth].update_map(trajectory=ft,
                                                             risk_value=0.999,
-                                                            draw_tree_ax=tree_ax if depth == 1 else None
+                                                            draw_tree_ax=tree_ax if depth == 1 else None,
+                                                            use_bev_weight=True,
                                                                   )
                 collision_risk_sum += ft_risk
                 if trajectory_collect_tree is not None:
@@ -1231,7 +1264,8 @@ class FrenetPlanner(Planner):
 
                 self.interaction_maps[depth].update_map(trajectory=ft,
                                                             risk_value=future_risk * self.decay_rate,
-                                                        draw_tree_ax=tree_ax if depth == 1 else None)
+                                                        draw_tree_ax=tree_ax if depth == 1 else None,
+                                                        use_bev_weight=True)
                 valid_ft_risk_list.append(future_risk * self.decay_rate)
 
 
@@ -1397,7 +1431,46 @@ class FrenetPlanner(Planner):
         valid_ft_list = []
         leaving_road_ft_list = []
 
+        if hasattr(self, 'bev_prob_loader') and self.bev_prob_loader is not None and self.bev_prob_loader.is_available:
+            base_time_step = getattr(global_state, "time_step", self.time_step)
+            self.bev_prob_loader.set_time_step(base_time_step)
+
+        if (
+            self.active_learning
+            and getattr(self, "log_bev_prob_stats", False)
+            and hasattr(self, 'bev_prob_loader')
+            and self.bev_prob_loader is not None
+            and self.bev_prob_loader.is_available
+            and getattr(global_state, "time_step", None) == self.time_step
+            and len(ft_list) > 0
+        ):
+            probs_dbg = []
+            for fp in ft_list:
+                p = self._compute_traj_max_bev_prob(fp)
+                if p is None:
+                    continue
+                probs_dbg.append(float(p))
+            if len(probs_dbg) > 0:
+                probs_arr = np.asarray(probs_dbg, dtype=np.float64)
+                pct_gt_01 = float(np.mean(probs_arr > 0.1) * 100.0)
+                pct_non_default = float(np.mean(probs_arr < 1.0) * 100.0)
+                print(
+                    "[BEV][AL][t={}] n={} min={:.4f} mean={:.4f} max={:.4f} p>0.1={:.2f}% p<1.0={:.2f}%".format(
+                        self.time_step,
+                        len(probs_arr),
+                        float(np.min(probs_arr)),
+                        float(np.mean(probs_arr)),
+                        float(np.max(probs_arr)),
+                        pct_gt_01,
+                        pct_non_default,
+                    )
+                )
+
         for fp in ft_list:
+            # In active_learning mode, risk map fusion in InteractionMap.update_map
+            # uses trajectory.bev_probability. Attach it for every candidate traj.
+            self._attach_bev_prob_to_traj(fp)
+
             # check validity
             fp.valid_level, fp.reason_invalid, fp.collision_step, fp.uncertainty_list = check_validity(
                 ft=fp,

@@ -414,8 +414,8 @@ class FrenetPlanner(Planner):
         Returns None when BEV loader/data is unavailable.
         """
         if (not hasattr(self, "bev_prob_loader") or
-                self.bev_prob_loader is None or
-                not self.bev_prob_loader.is_available):
+            self.bev_prob_loader is None or
+            not self.bev_prob_loader.is_available):
             return None
 
         max_bev_prob = 0.0

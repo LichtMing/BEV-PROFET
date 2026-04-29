@@ -380,7 +380,17 @@ class InteractionMap(object):
                         self.bev_count_map[rr, cc] += 1
 
                 if draw_tree_ax is not None:
-                    draw_tree_ax.plot([p1[0], p2[0]], [p1[1], p2[1]], c=self.cmap(grid_risk - 0.001 if grid_risk == 1 else grid_risk), linewidth=2.5, zorder=25)
+                    color_value = grid_risk
+                    if traj_bev_prob is not None:
+                        color_value = 0.7 * grid_risk + 0.3 * traj_bev_prob
+                    color_value = max(0.0, min(1.0, color_value))
+                    draw_tree_ax.plot(
+                        [p1[0], p2[0]],
+                        [p1[1], p2[1]],
+                        c=self.cmap(color_value - 0.001 if color_value == 1 else color_value),
+                        linewidth=2.5,
+                        zorder=25,
+                    )
                 if trajectory.collision_step != -1 and i > trajectory.collision_step:
                     risk_after_collision.append(effective_risk)
                     grid_risk = grid_risk

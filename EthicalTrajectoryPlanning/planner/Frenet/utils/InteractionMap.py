@@ -142,8 +142,6 @@ class InteractionMap(object):
                 self._build_nonlinear_mapping()
             grid_side = self._half_pixels * 2
             self.risk_map = np.zeros((grid_side, grid_side), dtype=np.float64)
-            self.bev_prob_map = np.zeros((grid_side, grid_side), dtype=np.float64)
-            self.bev_count_map = np.zeros((grid_side, grid_side), dtype=np.float64)
             self.tree_map = np.zeros((grid_side, grid_side), dtype=np.float64)
             self.visited_map = np.full((grid_side, grid_side), 0.001, dtype=np.float64)
             self.risk_map_vertical = np.zeros((grid_side, grid_side), dtype=np.float64)
@@ -156,8 +154,6 @@ class InteractionMap(object):
             # Original uniform behaviour
             self.bev_map = bev_map
             self.risk_map = np.full_like(bev_map, fill_value=0, dtype=np.float64)
-            self.bev_prob_map = np.full_like(bev_map, fill_value=0, dtype=np.float64)
-            self.bev_count_map = np.full_like(bev_map, fill_value=0, dtype=np.float64)
             self.tree_map = np.full_like(bev_map, fill_value=0, dtype=np.float64)
             self.visited_map = np.full_like(bev_map, fill_value=0.001, dtype=np.float64)
             self.risk_map_vertical = np.full_like(bev_map, fill_value=0, dtype=np.float64)
@@ -324,13 +320,16 @@ class InteractionMap(object):
         if update_range is None:
             update_range = self.update_length
 
-        # Build the base map first; BEV fusion is applied when reading output.
-        grid_risk = risk_value
-        traj_bev_prob = None
+        # BEV weight integration: only apply when BEV data is available (probability < 1.0)
         if (use_bev_weight and
             hasattr(trajectory, 'bev_probability') and
             trajectory.bev_probability < 1.0):
-            traj_bev_prob = float(trajectory.bev_probability)
+            # Weighted average: 0.7 × collision_risk + 0.3 × BEV probability
+            # When BEV data is available, blend both signals
+            grid_risk = (0.7 * risk_value + 0.3 * trajectory.bev_probability)
+        else:
+            # BEV data missing or disabled: use original risk value
+            grid_risk = risk_value
         grid_max = self.risk_map.shape[0]
         risk_after_collision = []
         is_speed_mode = (self.resolution_mode == 'speed')
@@ -358,9 +357,6 @@ class InteractionMap(object):
                     if 0 <= r < grid_max and 0 <= c < grid_max:
                         self.risk_map[r, c] += effective_risk
                         self.visited_map[r, c] += 1
-                        if traj_bev_prob is not None:
-                            self.bev_prob_map[r, c] += traj_bev_prob
-                            self.bev_count_map[r, c] += 1
                 else:
                     if trajectory.uncertainty_list is not None and grid_risk > 0.1:
                         unc_idx = min(i - 1, len(trajectory.uncertainty_list) - 1)
@@ -375,22 +371,9 @@ class InteractionMap(object):
 
                     self.risk_map[rr, cc] += effective_risk * vals
                     self.visited_map[rr, cc] += 1
-                    if traj_bev_prob is not None:
-                        self.bev_prob_map[rr, cc] += traj_bev_prob * vals
-                        self.bev_count_map[rr, cc] += 1
 
                 if draw_tree_ax is not None:
-                    color_value = grid_risk
-                    if traj_bev_prob is not None:
-                        color_value = 0.7 * grid_risk + 0.3 * traj_bev_prob
-                    color_value = max(0.0, min(1.0, color_value))
-                    draw_tree_ax.plot(
-                        [p1[0], p2[0]],
-                        [p1[1], p2[1]],
-                        c=self.cmap(color_value - 0.001 if color_value == 1 else color_value),
-                        linewidth=2.5,
-                        zorder=25,
-                    )
+                    draw_tree_ax.plot([p1[0], p2[0]], [p1[1], p2[1]], c=self.cmap(grid_risk - 0.001 if grid_risk == 1 else grid_risk), linewidth=2.5, zorder=25)
                 if trajectory.collision_step != -1 and i > trajectory.collision_step:
                     risk_after_collision.append(effective_risk)
                     grid_risk = grid_risk
@@ -472,18 +455,7 @@ class InteractionMap(object):
         return self.origin + pixel * self.size
 
     def get_map(self):
-        base_map = self.risk_map / self.visited_map
-
-        bev_mask = self.bev_count_map > 0
-        if not np.any(bev_mask):
-            return base_map
-
-        bev_avg_map = np.zeros_like(base_map)
-        bev_avg_map[bev_mask] = self.bev_prob_map[bev_mask] / self.bev_count_map[bev_mask]
-
-        fused_map = base_map.copy()
-        fused_map[bev_mask] = 0.7 * base_map[bev_mask] + 0.3 * bev_avg_map[bev_mask]
-        return fused_map
+        return self.risk_map / self.visited_map
 
     def save_map_vertical(self, file):
         img = self.risk_map_vertical / self.visited_map_vertical * 128
@@ -523,8 +495,7 @@ class InteractionMap(object):
             global_positions = pixel_to_plot * np.array(self.size) + self.origin[:, np.newaxis]
             global_positions = (global_positions[0], global_positions[1])
             sizes = (200. / fig.dpi) ** 2
-        fused_map = self.get_map()
-        a1 = ax.scatter(global_positions[0], global_positions[1], s=sizes, marker='s', c=self.cmap(fused_map[pixel_to_plot]), alpha=0.8, zorder=25)
+        a1 = ax.scatter(global_positions[0], global_positions[1], s=sizes, marker='s', c=self.cmap(self.risk_map[pixel_to_plot]), alpha=0.8, zorder=25)
         # try:
         #     shape = alphashape.alphashape(list(zip(global_positions[0], global_positions[1])))
         # except:
@@ -553,12 +524,11 @@ class InteractionMap(object):
     def sum_traj_risk(self, traj: [[float]]):
         risk_sum = 0
         grid_max = self.risk_map.shape[0]
-        fused_map = self.get_map()
         for (x, y, s, d, v, yaw) in traj:
             pos = np.asarray([x, y])
             if self.in_map_check(pos):
                 pixel_pos = self.position_to_pixel(pos)
                 r, c = pixel_pos[0], pixel_pos[1]
                 if 0 <= r < grid_max and 0 <= c < grid_max:
-                    risk_sum += fused_map[r, c]
+                    risk_sum += self.risk_map[r, c]
         return risk_sum

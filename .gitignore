@@ -44,5 +44,6 @@ planner/plannertools/Frenet/results
 
 tmp*
 
-planner/Frenet/batch_logs
+
+EthicalTrajectoryPlanning/planner/Frenet/batch_logs
 

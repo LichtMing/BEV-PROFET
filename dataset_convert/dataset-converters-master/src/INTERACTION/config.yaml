@@ -109,18 +109,18 @@ tags:
     BGR_Interaction-1: urban multi_lane intersection comfort
 
 directory_data:
-    CHN_Merging-1: INTERACTION-Dataset-DR-v1_0/recorded_trackfiles/DR_CHN_Merging_ZS/
-    CHN_Roundabout-1: INTERACTION-Dataset-DR-v1_0/recorded_trackfiles/DR_CHN_Roundabout_LN/
-    DEU_Merging-1: INTERACTION-Dataset-DR-v1_0/recorded_trackfiles/DR_DEU_Merging_MT/
-    DEU_Roundabout-1: INTERACTION-Dataset-DR-v1_0/recorded_trackfiles/DR_DEU_Roundabout_OF/
-    USA_Intersection-1: INTERACTION-Dataset-DR-v1_1/recorded_trackfiles/DR_USA_Intersection_EP0/
-    USA_Intersection-2: INTERACTION-Dataset-DR-v1_1/recorded_trackfiles/DR_USA_Intersection_EP1/
-    USA_Intersection-3: INTERACTION-Dataset-DR-v1_1/recorded_trackfiles/DR_USA_Intersection_GL/
-    USA_Intersection-4: INTERACTION-Dataset-DR-v1_1/recorded_trackfiles/DR_USA_Intersection_MA/
-    USA_Roundabout-1: INTERACTION-Dataset-DR-v1_0/recorded_trackfiles/DR_USA_Roundabout_EP/
-    USA_Roundabout-2: INTERACTION-Dataset-DR-v1_0/recorded_trackfiles/DR_USA_Roundabout_FT/
-    USA_Roundabout-3: INTERACTION-Dataset-DR-v1_0/recorded_trackfiles/DR_USA_Roundabout_SR/
-    BGR_Interaction-1: INTERACTION-Dataset-TC-v1_0/recorded_trackfiles/TC_BGR_Intersection_VA/
+    CHN_Merging-1: recorded_trackfiles/DR_CHN_Merging_ZS/
+    CHN_Roundabout-1: recorded_trackfiles/DR_CHN_Roundabout_LN/
+    DEU_Merging-1: recorded_trackfiles/DR_DEU_Merging_MT/
+    DEU_Roundabout-1: recorded_trackfiles/DR_DEU_Roundabout_OF/
+    USA_Intersection-1: recorded_trackfiles/DR_USA_Intersection_EP0/
+    USA_Intersection-2: recorded_trackfiles/DR_USA_Intersection_EP1/
+    USA_Intersection-3: recorded_trackfiles/DR_USA_Intersection_GL/
+    USA_Intersection-4: recorded_trackfiles/DR_USA_Intersection_MA/
+    USA_Roundabout-1: recorded_trackfiles/DR_USA_Roundabout_EP/
+    USA_Roundabout-2: recorded_trackfiles/DR_USA_Roundabout_FT/
+    USA_Roundabout-3: recorded_trackfiles/DR_USA_Roundabout_SR/
+    BGR_Interaction-1: recorded_trackfiles/TC_BGR_Intersection_VA/
 
 flag_same_direction_problems:
     CHN_Merging-1: True

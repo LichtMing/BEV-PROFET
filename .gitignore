@@ -48,6 +48,11 @@ tmp*
 EthicalTrajectoryPlanning/planner/Frenet/batch_logs
 
 
-merging
+
 
 dataset_convert/INTERACTION-Dataset-DR-v1_1
+
+bev_v2x_transformer/merging/BEVData/
+bev_v2x_transformer/merging/BEVLabel/
+bev_v2x_transformer/merging/BEVMaskData/
+bev_v2x_transformer/merging/ZS-0.mtsdb.meta

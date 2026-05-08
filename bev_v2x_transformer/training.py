@@ -1,6 +1,6 @@
 import os
 # 1. 魔法药水：治理显存碎片
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+# os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 import torch
 import torch.optim as optim
@@ -9,14 +9,14 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from data_loader_v4 import TrainDataset
 from Main import MainModel
-from torch.amp import GradScaler 
+from torch.cuda.amp import GradScaler
 
 # === 基础设置 ===
 torch.backends.cudnn.benchmark = True 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print(f"⚡ 正在使用 L4 法拉利: {torch.cuda.get_device_name(0)} ⚡")
 
-data_path = "./BEVData_01"
+data_path = "./merging/BEVData"
 if not os.path.exists(data_path):
     print(f"❌ 找不到文件夹 {data_path}")
     exit()
@@ -29,7 +29,7 @@ BATCH_SIZE = 64
 
 # 2. 【关键】增加轮数！
 # 治“粘连”这种细活，必须得多练。50轮不够，咱们跑 80 轮！
-EPOCHS = 80
+EPOCHS = 150
 
 dataset = TrainDataset(all_indices)
 
@@ -57,7 +57,7 @@ model = MainModel(
 ).to(device)
 
 optimizer = optim.Adam(model.parameters(), lr=0.001)
-scaler = GradScaler('cuda')
+scaler = GradScaler()
 
 # === 【核心药方】混合 Loss 定义 ===
 class CombinedLoss(nn.Module):
@@ -135,7 +135,7 @@ for epoch in range(EPOCHS):
     
     # 咱们每 20 轮存一次就行，不用太频繁
     if (epoch + 1) % 20 == 0:
-        save_path = f"model_turbo_epoch_{epoch+1}.pth"
+        save_path = f"merging_model_turbo_epoch_{epoch+1}.pth"
         torch.save(model.state_dict(), save_path)
         print(f"存档成功: {save_path}")
 

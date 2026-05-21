@@ -1,12 +1,22 @@
 __pycache__/
 .github/
-bev_v2x_transformer/All_Predictions_Result/
+.claude/
 bev_v2x_transformer/BEVData_01/
 bev_v2x_transformer/BEVImgLabel_01/
 bev_v2x_transformer/BEVImgData_01/
 bev_v2x_transformer/BEVLabel_01/
 bev_v2x_transformer/BEVMaskData_01/
 bev_v2x_transformer/BEVPredProb/
+bev_v2x_transformer/merging/
+bev_v2x_transformer/mergingBEVPredProb/
+bev_v2x_transformer/mergingBEVPredProb_vision/
+bev_v2x_transformer/db/
+bev_v2x_transformer/roundabout/
+bev_v2x_transformer/roundaboutBEVPredProb/
+bev_v2x_transformer/roundaboutBEVPredProb_vision/
+bev_v2x_transformer/BEVPredProb_vision/
+
+
 scenario_vis/
 scenarios/
 saved_fig/
@@ -28,6 +38,7 @@ saved_fig/
 *.csv
 *.jpg
 *.log
+*.pth
 out/
 
 planner/GlobalPath/results/
@@ -52,7 +63,3 @@ EthicalTrajectoryPlanning/planner/Frenet/batch_logs
 
 dataset_convert/INTERACTION-Dataset-DR-v1_1
 
-bev_v2x_transformer/merging/BEVData/
-bev_v2x_transformer/merging/BEVLabel/
-bev_v2x_transformer/merging/BEVMaskData/
-bev_v2x_transformer/merging/ZS-0.mtsdb.meta

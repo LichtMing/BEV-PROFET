@@ -1,4 +1,31 @@
 #!/usr/bin/env python3
+"""
+Batch run CommonRoad scenarios using frenet_planner.py.
+
+Supports three scenario families:
+  USA_Intersection-1, CHN_Merging-1, DEU_Roundabout-1
+
+Usage examples:
+  # USA scenarios 1-10 (default family, backward compatible)
+  python run_scenarios_batch.py --start-id 1 --end-id 10
+
+  # CHN_Merging scenarios 50-60, with 300s timeout
+  python run_scenarios_batch.py --scenario-family CHN_Merging-1 --start-id 50 --end-id 60 --timeout 300
+
+  # DEU_Roundabout all scenarios, resume from previous run
+  python run_scenarios_batch.py --scenario-family DEU_Roundabout-1 --resume
+
+  # ALL three families, dry-run first to preview
+  python run_scenarios_batch.py --scenario-family ALL --dry-run
+
+  # Stop immediately on first failure
+  python run_scenarios_batch.py --scenario-family ALL --stop-on-failure
+
+Note: change bev_prob_dir in configs/planning_fast.json to match the scenario family:
+  USA_Intersection-1 -> BEVPredProb
+  CHN_Merging-1      -> mergingBEVPredProb
+  DEU_Roundabout-1   -> roundaboutBEVPredProb
+"""
 import argparse
 import csv
 import json
@@ -14,7 +41,18 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 
-SCENARIO_REGEX = re.compile(r"^USA_Intersection-1_(\d+)_T-1\.xml$")
+SCENARIO_FAMILIES = ["USA_Intersection-1", "CHN_Merging-1", "DEU_Roundabout-1"]
+
+SCENARIO_REGEX_MAP = {
+    family: re.compile(rf"^{re.escape(family)}_(\d+)_T-1\.xml$")
+    for family in SCENARIO_FAMILIES
+}
+
+# Default: USA_Intersection-1  (backward-compatible with older invocations)
+DEFAULT_SCENARIO_FAMILY = "USA_Intersection-1"
+
+# For "ALL" runs, the completed-id key is "family::id" to avoid collisions.
+ID_SEP = "::"
 
 
 @dataclass
@@ -37,6 +75,14 @@ def parse_args() -> argparse.Namespace:
 
     parser = argparse.ArgumentParser(
         description="Batch run CommonRoad scenarios using frenet_planner.py"
+    )
+    parser.add_argument(
+        "--scenario-family",
+        type=str,
+        default=DEFAULT_SCENARIO_FAMILY,
+        choices=SCENARIO_FAMILIES + ["ALL"],
+        help=f"Scenario family to batch-run (default: {DEFAULT_SCENARIO_FAMILY}). "
+             f"Use 'ALL' to run all families sequentially.",
     )
     parser.add_argument(
         "--start-id",
@@ -92,15 +138,17 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def find_scenarios(scenarios_dir: Path) -> List[Tuple[int, str]]:
+def find_scenarios(scenarios_dir: Path, family: str) -> List[Tuple[int, str]]:
     if not scenarios_dir.exists():
         raise FileNotFoundError(f"Scenarios dir not found: {scenarios_dir}")
+
+    scenario_regex = SCENARIO_REGEX_MAP[family]
 
     scenarios: List[Tuple[int, str]] = []
     for entry in scenarios_dir.iterdir():
         if not entry.is_file():
             continue
-        match = SCENARIO_REGEX.match(entry.name)
+        match = scenario_regex.match(entry.name)
         if match:
             scenario_id = int(match.group(1))
             scenarios.append((scenario_id, entry.name))
@@ -204,6 +252,7 @@ def run_one_scenario(
     scenario_name: str,
     log_file: Path,
     timeout: Optional[float],
+    family: str = DEFAULT_SCENARIO_FAMILY,
 ) -> ScenarioResult:
     cmd = [sys.executable, str(planner_file.name), "--scenario", scenario_name]
     command_for_display = " ".join(shlex.quote(x) for x in cmd)
@@ -238,7 +287,8 @@ def run_one_scenario(
         lf.write(f"[STATUS] {status}\n")
         lf.flush()
 
-    match = SCENARIO_REGEX.match(scenario_name)
+    scenario_regex = SCENARIO_REGEX_MAP.get(family, SCENARIO_REGEX_MAP[DEFAULT_SCENARIO_FAMILY])
+    match = scenario_regex.match(scenario_name)
     scenario_id = int(match.group(1)) if match else -1
 
     return ScenarioResult(
@@ -254,19 +304,31 @@ def run_one_scenario(
     )
 
 
-def main() -> int:
-    args = parse_args()
+def _completed_key(family: str, scenario_id: int) -> str:
+    """Build a unique completed-id key that avoids collisions across families."""
+    return f"{family}{ID_SEP}{scenario_id}"
 
-    all_scenarios = find_scenarios(args.scenarios_dir.resolve())
+
+def _run_family_batch(
+    args: argparse.Namespace,
+    family: str,
+    run_dir: Path,
+    logs_dir: Path,
+    state: dict,
+    all_results: List[ScenarioResult],
+) -> Tuple[List[ScenarioResult], bool]:
+    """Run one scenario family.  Returns (updated_results, interrupted)."""
+
+    all_scenarios = find_scenarios(args.scenarios_dir.resolve(), family)
     if not all_scenarios:
-        print("No matched scenarios found.")
-        return 1
+        print(f"[{family}] No matched scenarios found.")
+        return all_results, False
 
     max_available_id = max(sid for sid, _ in all_scenarios)
     end_id = args.end_id if args.end_id is not None else max_available_id
     if end_id < args.start_id:
-        print(f"Invalid range: start-id={args.start_id}, end-id={end_id}")
-        return 1
+        print(f"[{family}] Invalid range: start-id={args.start_id}, end-id={end_id}")
+        return all_results, False
 
     selected = [
         (sid, name)
@@ -275,65 +337,41 @@ def main() -> int:
     ]
 
     if not selected:
-        print("No scenarios selected in requested id range.")
-        return 1
+        print(f"[{family}] No scenarios in requested id range.")
+        return all_results, False
 
-    run_dir = make_run_dir(args.log_root.resolve(), args.resume)
-    logs_dir = run_dir / "logs"
-    logs_dir.mkdir(parents=True, exist_ok=True)
     state_file = run_dir / "state.json"
-
-    state = load_state(state_file)
     completed_ids = set(state.get("completed_ids", [])) if args.resume else set()
 
-    print("=" * 80)
-    print("Scenario batch runner")
-    print(f"Scenarios dir: {args.scenarios_dir.resolve()}")
-    print(f"Planner file : {args.planner_file.resolve()}")
-    print(f"Run logs dir : {run_dir}")
-    print(f"ID range     : {args.start_id} -> {end_id}")
-    print(f"Total queued : {len(selected)}")
-    print(f"Resume mode  : {args.resume}")
-    print("=" * 80)
+    print(f"[{family}] {len(selected)} scenarios queued (range {args.start_id}-{end_id})")
 
-    results: List[ScenarioResult] = []
     interrupted = False
-
     try:
         for index, (scenario_id, scenario_name) in enumerate(selected, start=1):
-            if scenario_id in completed_ids:
-                print(f"[{index}/{len(selected)}] SKIP  {scenario_name} (already completed)")
+            ckey = _completed_key(family, scenario_id)
+
+            if ckey in completed_ids:
+                print(f"[{family}][{index}/{len(selected)}] SKIP  {scenario_name}")
                 skip_item = ScenarioResult(
-                    scenario_id=scenario_id,
-                    scenario_name=scenario_name,
-                    command="",
-                    status="skipped",
-                    return_code=None,
-                    duration_sec=0.0,
-                    started_at="",
-                    finished_at="",
-                    log_file="",
+                    scenario_id=scenario_id, scenario_name=scenario_name,
+                    command="", status="skipped", return_code=None,
+                    duration_sec=0.0, started_at="", finished_at="", log_file="",
                 )
-                results.append(skip_item)
+                all_results.append(skip_item)
                 continue
 
-            log_file = logs_dir / f"{scenario_id}_{scenario_name}.log"
+            log_file = logs_dir / f"{family}_{scenario_id}.log"
             cmd_preview = f"python {args.planner_file.name} --scenario {scenario_name}"
-            print(f"[{index}/{len(selected)}] RUN   {cmd_preview}")
+            print(f"[{family}][{index}/{len(selected)}] RUN   {cmd_preview}")
 
             if args.dry_run:
                 dry_item = ScenarioResult(
-                    scenario_id=scenario_id,
-                    scenario_name=scenario_name,
-                    command=cmd_preview,
-                    status="skipped",
-                    return_code=None,
-                    duration_sec=0.0,
-                    started_at="",
-                    finished_at="",
+                    scenario_id=scenario_id, scenario_name=scenario_name,
+                    command=cmd_preview, status="skipped", return_code=None,
+                    duration_sec=0.0, started_at="", finished_at="",
                     log_file=str(log_file),
                 )
-                results.append(dry_item)
+                all_results.append(dry_item)
                 continue
 
             result = run_one_scenario(
@@ -341,19 +379,21 @@ def main() -> int:
                 scenario_name=scenario_name,
                 log_file=log_file,
                 timeout=args.timeout,
+                family=family,
             )
-            results.append(result)
-            completed_ids.add(scenario_id)
+            all_results.append(result)
+            completed_ids.add(ckey)
 
             state = {
                 "completed_ids": sorted(completed_ids),
-                "results": [asdict(r) for r in results],
+                "results": [asdict(r) for r in all_results],
                 "updated_at": datetime.now().isoformat(timespec="seconds"),
+                "scenario_family": family,
             }
             save_state(state_file, state)
 
             print(
-                f"[{index}/{len(selected)}] DONE  {scenario_name} "
+                f"[{family}][{index}/{len(selected)}] DONE  {scenario_name} "
                 f"status={result.status} time={result.duration_sec:.2f}s"
             )
 
@@ -362,9 +402,54 @@ def main() -> int:
                 break
     except KeyboardInterrupt:
         interrupted = True
-        print("\nKeyboardInterrupt received. Finalizing partial report...")
+        print("\nKeyboardInterrupt received. Stopping current family...")
 
-    summary = summarize(results)
+    return all_results, interrupted
+
+
+def main() -> int:
+    args = parse_args()
+
+    families_to_run: List[str]
+    if args.scenario_family == "ALL":
+        families_to_run = SCENARIO_FAMILIES
+    else:
+        families_to_run = [args.scenario_family]
+
+    run_dir = make_run_dir(args.log_root.resolve(), args.resume)
+    logs_dir = run_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    state_file = run_dir / "state.json"
+    state = load_state(state_file)
+
+    print("=" * 80)
+    print("Scenario batch runner")
+    print(f"Scenarios dir : {args.scenarios_dir.resolve()}")
+    print(f"Planner file  : {args.planner_file.resolve()}")
+    print(f"Run logs dir  : {run_dir}")
+    print(f"ID range      : {args.start_id} -> {args.end_id or 'auto'}")
+    print(f"Family        : {args.scenario_family}")
+    print(f"Resume mode   : {args.resume}")
+    print(f"Timeout       : {args.timeout or 'none'}")
+    print("=" * 80)
+
+    all_results: List[ScenarioResult] = []
+    interrupted = False
+
+    for family in families_to_run:
+        if len(families_to_run) > 1:
+            print(f"\n{'='*80}")
+            print(f"Family: {family}")
+            print(f"{'='*80}")
+
+        all_results, family_interrupted = _run_family_batch(
+            args, family, run_dir, logs_dir, state, all_results,
+        )
+        if family_interrupted:
+            interrupted = True
+            break
+
+    summary = summarize(all_results)
     summary_json_path = run_dir / "summary.json"
     summary_md_path = run_dir / "summary.md"
     results_csv_path = run_dir / "results.csv"
@@ -373,7 +458,7 @@ def main() -> int:
         json.dump(summary, f, ensure_ascii=False, indent=2)
 
     write_summary_md(summary_md_path, summary, run_dir)
-    write_results_csv(results_csv_path, results)
+    write_results_csv(results_csv_path, all_results)
 
     print("\n" + "=" * 80)
     print("Batch completed")

@@ -14,9 +14,9 @@ import random
 
 class TrainDataset(Dataset):
     def __init__(self, train_idx):
-        train_file = os.listdir("./merging/BEVData/")
-        mask_file = os.listdir("./merging/BEVMaskData/")
-        label_file = os.listdir("./merging/BEVLabel/")
+        train_file = os.listdir("./roundabout/BEVData/")
+        mask_file = os.listdir("./roundabout/BEVMaskData/")
+        label_file = os.listdir("./roundabout/BEVLabel/")
         train_file = sorted(train_file, key=lambda x: (int(x[:x.find("_")]), int(x[x.find("_") + 1 : x.find(".")])))
         mask_file = sorted(mask_file, key=lambda x: (int(x[:x.find("_")]), int(x[x.find("_") + 1 : x.find(".")])))
         label_file = sorted(label_file, key=lambda x: (int(x[:x.find("_")]), int(x[x.find("_") + 1 : x.find(".")])))
@@ -31,9 +31,9 @@ class TrainDataset(Dataset):
 
     def __getitem__(self, idx):
         # 读取三个文件夹里的同名文件
-        train_npy = np.load("./merging/BEVData/" + self.train_file_list[idx])
-        mask_npy = np.load("./merging/BEVMaskData/" + self.mask_file_list[idx])
-        label_npy = np.load("./merging/BEVLabel/" + self.label_file_list[idx])
+        train_npy = np.load("./roundabout/BEVData/" + self.train_file_list[idx])
+        mask_npy = np.load("./roundabout/BEVMaskData/" + self.mask_file_list[idx])
+        label_npy = np.load("./roundabout/BEVLabel/" + self.label_file_list[idx])
 
         # 转换成模型认识的格式 (Float32)
         train_arr = torch.from_numpy(np.array(train_npy, dtype=np.float32))
@@ -45,9 +45,9 @@ class TrainDataset(Dataset):
 
 class TestDataset(Dataset):
     def __init__(self, test_idx):
-        test_file = os.listdir("./merging/BEVData/")
-        mask_file = os.listdir("./merging/BEVMaskData/")
-        label_file = os.listdir("./merging/BEVLabel/")
+        test_file = os.listdir("./roundabout/BEVData/")
+        mask_file = os.listdir("./roundabout/BEVMaskData/")
+        label_file = os.listdir("./roundabout/BEVLabel/")
         test_file = sorted(test_file, key=lambda x: (int(x[:x.find("_")]), int(x[x.find("_") + 1 : x.find(".")])))
         mask_file = sorted(mask_file, key=lambda x: (int(x[:x.find("_")]), int(x[x.find("_") + 1 : x.find(".")])))
         label_file = sorted(label_file, key=lambda x: (int(x[:x.find("_")]), int(x[x.find("_") + 1 : x.find(".")])))
@@ -60,9 +60,9 @@ class TestDataset(Dataset):
         return self.len
 
     def __getitem__(self, idx):
-        test_npy = np.load("./merging/BEVData/" + self.test_file_list[idx])
-        mask_npy = np.load("./merging/BEVMaskData/" + self.mask_file_list[idx])
-        label_npy = np.load("./merging/BEVLabel/" + self.label_file_list[idx])
+        test_npy = np.load("./roundabout/BEVData/" + self.test_file_list[idx])
+        mask_npy = np.load("./roundabout/BEVMaskData/" + self.mask_file_list[idx])
+        label_npy = np.load("./roundabout/BEVLabel/" + self.label_file_list[idx])
         test_arr = np.array(test_npy, dtype=np.float32)
         mask_arr = np.array(mask_npy, dtype=np.uint8)
         label_arr = np.array(label_npy, dtype=np.float32)
@@ -74,9 +74,9 @@ class TestDataset(Dataset):
 
 
 if __name__ == '__main__':
-    test_file = os.listdir("./merging/BEVData/")
-    mask_file = os.listdir("./merging/BEVMaskData/")
-    label_file = os.listdir("./merging/BEVLabel/")
+    test_file = os.listdir("./roundabout/BEVData/")
+    mask_file = os.listdir("./roundabout/BEVMaskData/")
+    label_file = os.listdir("./roundabout/BEVLabel/")
     test_file = sorted(test_file, key=lambda x: (int(x[:x.find("_")]), int(x[x.find("_") + 1: x.find(".")])))
     mask_file = sorted(mask_file, key=lambda x: (int(x[:x.find("_")]), int(x[x.find("_") + 1: x.find(".")])))
     label_file = sorted(label_file, key=lambda x: (int(x[:x.find("_")]), int(x[x.find("_") + 1: x.find(".")])))

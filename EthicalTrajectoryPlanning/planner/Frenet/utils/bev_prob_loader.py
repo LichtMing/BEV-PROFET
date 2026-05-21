@@ -4,25 +4,23 @@ bev_prob_loader.py
 Load BEVPredProb probability maps and integrate them as a risk factor
 for trajectory planning.
 
-BEVPredProb/{k}_{timestamp_ms}/T1.npy, T2.npy, T3.npy
-  - 288×288 float32 probability map covering 144m × 144m
-  - Resolution: 0.5 m/pixel
-  - Centered at INTERACTION world (1003, 995)
-  - T1: +1s prediction, T2: +2s, T3: +3s
+Supported scenarios:
+  - USA_Intersection-1: BEVPredProb/{k}_{timestamp_ms}/T1.npy, T2.npy, T3.npy
+  - CHN_Merging-1:     mergingBEVPredProb/{k}_{timestamp_idx}/T1.npy, T2.npy, T3.npy
+  - DEU_Roundabout-1:  roundaboutBEVPredProb/{segment_id}_{timestamp_idx}/T1.npy, ...
 
-Coordinate transformation:
-  INTERACTION → CommonRoad:  CR_x = INTER_x - 945,  CR_y = INTER_y - 993.5
-  CommonRoad (x,y) → BEV pixel (row, col):
-    col_288 = 2 * (cr_x + 14.5)    = 2 * cr_x + 29
-    row_288 = -2 * cr_y + 148
+All BEV maps: 288x288 float32 probability map covering 144m x 144m,
+Resolution: 0.5 m/pixel. T1: +1s prediction, T2: +2s, T3: +3s.
 
-Scenario mapping:
-  BEV folder name: {k}_{timestamp_ms}
-  CR_step = timestamp_ms / 100
-  segment = (CR_step - 1) // 150          (0-based within recording k)
-  time_step_in_scenario = (CR_step - 1) % 150   (scenario-internal, 0-based)
-  scenario_id = ID_OFFSET[k] + segment
-  benchmark_id = f"USA_Intersection-1_{scenario_id}_T-1"
+Coordinate transformation (generic):
+  INTERACTION = CR + (x_offset, y_offset)
+  col_288 = 2 * ((INTERACTION.x - center_x) + 72.0 + 0.5)
+  row_288 = 2 * (-(INTERACTION.y - center_y) + 72.0 + 0.5)
+
+Scenario-specific geometry:
+  USA_Intersection-1:  offset=(945.0, 993.5), center=(1003.0, 995.0)
+  CHN_Merging-1:       offset=(1056.0, 954.5), center=(1075.0, 955.0)
+  DEU_Roundabout-1:    offset=(897.0, 1004.0), center=(1000.0, 992.0)
 """
 
 import os
@@ -35,8 +33,37 @@ from typing import Optional, Dict, Tuple, List
 ID_OFFSET = [1, 21, 39, 59, 79, 99, 119, 139]
 NUM_SEGMENTS = [20, 18, 20, 20, 20, 20, 20, 17]  # segments per recording
 
+# Scenario families supported by this loader
+SCENARIO_USA_INTERSECTION = "USA_Intersection-1"
+SCENARIO_CHN_MERGING = "CHN_Merging-1"
+SCENARIO_DEU_ROUNDABOUT = "DEU_Roundabout-1"
 
-def scenario_id_to_recording(scenario_id: int) -> Tuple[int, int]:
+# CHN_Merging mapping (derived from existing mergingBEVPredProb folders):
+#   folder: 1_{timestamp_idx}, timestamp_idx in [69, 3499], step=10
+#   scenario_id -> base timestamp_idx: 10 * scenario_id + 59
+CHN_MERGING_RECORDING_K = 1
+CHN_MERGING_BASE_OFFSET = 59
+CHN_MERGING_SCENARIO_STRIDE = 10
+
+# CHN_Merging BEV center (config item)
+# Updated from automatic alignment search in this workspace.
+CHN_MERGING_BEV_CENTER_X = 1075.0
+CHN_MERGING_BEV_CENTER_Y = 955.0
+
+# DEU_Roundabout: 12 MTSDB segments (1-12), each with BEV folders at stride 10.
+# Timestamps are MTSDB-internal step indices (~100ms per unit).
+# (min_ts, max_ts) per segment, derived from scanning roundaboutBEVPredProb/.
+DEU_ROUNDABOUT_SEGMENT_RANGES = {
+    1: (69, 3259), 2: (69, 3259), 3: (69, 3259), 4: (69, 3259),
+    5: (109, 2009), 6: (69, 3259), 7: (69, 3259), 8: (69, 1469),
+    9: (69, 3249), 10: (69, 2009), 11: (69, 2219), 12: (69, 2239),
+}
+DEU_ROUNDABOUT_SEGMENT_COUNT = 12
+DEU_ROUNDABOUT_TOTAL_SCENARIOS = 210  # nominal max scenario ID
+DEU_ROUNDABOUT_TS_STRIDE = 10  # BEV folders sampled at this index stride
+
+
+def usa_scenario_id_to_recording(scenario_id: int) -> Tuple[int, int]:
     """
     Convert a scenario ID to (recording_k, segment_within_recording).
 
@@ -50,15 +77,21 @@ def scenario_id_to_recording(scenario_id: int) -> Tuple[int, int]:
     raise ValueError(f"Cannot map scenario_id={scenario_id} to any recording")
 
 
-def parse_benchmark_id(benchmark_id: str) -> int:
-    """Extract scenario_id from benchmark_id like 'USA_Intersection-1_3_T-1'."""
-    m = re.search(r'USA_Intersection-1_(\d+)_T-1', benchmark_id)
+def parse_benchmark_id(benchmark_id: str) -> Tuple[str, int]:
+    """
+    Extract (scenario family, scenario_id) from benchmark id.
+
+    Supported examples:
+      - USA_Intersection-1_3_T-1
+      - CHN_Merging-1_57_T-1
+    """
+    m = re.search(r'(USA_Intersection-1|CHN_Merging-1|DEU_Roundabout-1)_(\d+)_T-1', benchmark_id)
     if m:
-        return int(m.group(1))
-    raise ValueError(f"Cannot parse scenario_id from benchmark_id={benchmark_id}")
+        return m.group(1), int(m.group(2))
+    raise ValueError(f"Cannot parse supported benchmark_id from '{benchmark_id}'")
 
 
-def scenario_time_to_bev_timestamp(k: int, segment: int, time_step: int) -> int:
+def usa_scenario_time_to_bev_timestamp(k: int, segment: int, time_step: int) -> int:
     """
     Convert (k, segment, scenario_time_step) to BEV raw timestamp_ms.
 
@@ -85,22 +118,40 @@ class BEVProbLoader:
         risk = loader.compute_traj_bev_risk(trajectory, search_length)
     """
 
-    # BEV grid parameters (global fixed, INTERACTION coordinate system)
-    BEV_CENTER_X = 1003.0   # INTERACTION world x center
-    BEV_CENTER_Y = 995.0    # INTERACTION world y center
-    BEV_AREA_RANGE = 144.0  # meters covered
-    BEV_SIZE = 288           # pixels
+    # BEV grid parameters
+    BEV_AREA_RANGE = 144.0   # meters covered
+    BEV_SIZE = 288            # pixels
     BEV_RESOLUTION = BEV_AREA_RANGE / BEV_SIZE  # 0.5 m/pixel
 
-    # CR ↔ INTERACTION coordinate offset (for USA_Intersection-1)
-    X_OFFSET = 945.0
-    Y_OFFSET = 993.5
+    # Scenario-specific geometry config (built-in defaults).
+    # Fallback used only if no external geometry is provided.
+    SCENARIO_GEOMETRY = {
+        SCENARIO_USA_INTERSECTION: {
+            "x_offset": 945.0,
+            "y_offset": 993.5,
+            "center_x": 1003.0,
+            "center_y": 995.0,
+        },
+        SCENARIO_CHN_MERGING: {
+            "x_offset": 1056.0,
+            "y_offset": 954.5,
+            "center_x": CHN_MERGING_BEV_CENTER_X,
+            "center_y": CHN_MERGING_BEV_CENTER_Y,
+        },
+        SCENARIO_DEU_ROUNDABOUT: {
+            "x_offset": 897.0,
+            "y_offset": 1004.0,
+            "center_x": 1000.0,
+            "center_y": 992.0,
+        },
+    }
 
     def __init__(
         self,
         bev_prob_dir: str,
         benchmark_id: str,
         bev_weight: float = 1.0,
+        scenario_geometry: Optional[Dict] = None,
     ):
         """
         Initialize the BEV probability loader.
@@ -109,22 +160,70 @@ class BEVProbLoader:
             bev_prob_dir: Path to BEVPredProb root directory
             benchmark_id: CommonRoad scenario benchmark_id (e.g. 'USA_Intersection-1_3_T-1')
             bev_weight: Scaling weight for BEV risk contribution
+            scenario_geometry: Optional dict with per-scenario geometry config.
+                If provided, overrides built-in SCENARIO_GEOMETRY.
+                Expected format: {
+                    "USA_Intersection-1": {"x_offset": ..., "y_offset": ..., "center_x": ..., "center_y": ...},
+                    "CHN_Merging-1": {...},
+                    ...
+                }
         """
         self.bev_prob_dir = bev_prob_dir
         self.benchmark_id = benchmark_id
         self.bev_weight = bev_weight
+        self.scenario_family: Optional[str] = None
+        self.scenario_id: Optional[int] = None
+        self.k = -1
+        self.segment = -1
 
-        # Parse scenario ID and determine recording/segment
+        # Use external geometry if provided, otherwise fall back to built-in defaults.
+        self._geometry_config = scenario_geometry if scenario_geometry else self.SCENARIO_GEOMETRY
+
+        # Parse scenario ID and determine mapping mode
         try:
-            self.scenario_id = parse_benchmark_id(benchmark_id)
-            self.k, self.segment = scenario_id_to_recording(self.scenario_id)
+            self.scenario_family, self.scenario_id = parse_benchmark_id(benchmark_id)
+
+            if self.scenario_family == SCENARIO_USA_INTERSECTION:
+                self.k, self.segment = usa_scenario_id_to_recording(self.scenario_id)
+            elif self.scenario_family == SCENARIO_CHN_MERGING:
+                self.k = CHN_MERGING_RECORDING_K
+                self.segment = self.scenario_id
+            elif self.scenario_family == SCENARIO_DEU_ROUNDABOUT:
+                # Determine MTSDB segment (1-12) from scenario_id.
+                # Default: evenly distribute 210 nominal scenario IDs across 12 segments.
+                scenarios_per_seg = DEU_ROUNDABOUT_TOTAL_SCENARIOS / DEU_ROUNDABOUT_SEGMENT_COUNT
+                self.k = int((self.scenario_id - 1) // scenarios_per_seg) + 1
+                self.k = max(1, min(DEU_ROUNDABOUT_SEGMENT_COUNT, self.k))
+                self.segment = self.scenario_id  # store for reference
+                # Default base_ts: segment's min timestamp.
+                # This aligns scenario time_step 0 with the first BEV frame of the segment.
+                self._roundabout_base_ts = DEU_ROUNDABOUT_SEGMENT_RANGES[self.k][0]
+                self._roundabout_max_ts = DEU_ROUNDABOUT_SEGMENT_RANGES[self.k][1]
+            else:
+                raise ValueError(f"Unsupported scenario family: {self.scenario_family}")
         except ValueError:
-            print(f"[BEVProbLoader] Warning: benchmark_id '{benchmark_id}' not a USA_Intersection-1 scenario. "
-                  f"BEV risk disabled.")
-            self.k = -1
-            self.segment = -1
+            print(
+                f"[BEVProbLoader] Warning: benchmark_id '{benchmark_id}' is not supported "
+                f"(supported: {SCENARIO_USA_INTERSECTION}, {SCENARIO_CHN_MERGING}, "
+                f"{SCENARIO_DEU_ROUNDABOUT}). BEV risk disabled."
+            )
             self.available_timestamps = {}
             return
+
+        # Select geometry by scenario family.
+        # First check external/config-provided geometry, then built-in defaults.
+        geom = self._geometry_config.get(self.scenario_family)
+        if geom is None:
+            geom = self.SCENARIO_GEOMETRY.get(
+                self.scenario_family,
+                self.SCENARIO_GEOMETRY[SCENARIO_USA_INTERSECTION],
+            )
+
+        # Keep uppercase aliases for backward compatibility with existing call sites.
+        self.X_OFFSET = float(geom["x_offset"])
+        self.Y_OFFSET = float(geom["y_offset"])
+        self.BEV_CENTER_X = float(geom["center_x"])
+        self.BEV_CENTER_Y = float(geom["center_y"])
 
         # Scan available BEV folders for this recording and segment
         self.available_timestamps = self._scan_available_timestamps()
@@ -133,8 +232,12 @@ class BEVProbLoader:
         self._cached_ts: Optional[int] = None
         self._cached_maps: Optional[List[np.ndarray]] = None  # [T1, T2, T3]
 
-        print(f"[BEVProbLoader] scenario={benchmark_id}, k={self.k}, segment={self.segment}, "
-              f"available BEV timestamps: {len(self.available_timestamps)}")
+        print(
+            f"[BEVProbLoader] scenario={benchmark_id}, family={self.scenario_family}, "
+            f"k={self.k}, segment={self.segment}, center=({self.BEV_CENTER_X:.1f}, "
+            f"{self.BEV_CENTER_Y:.1f}), available BEV timestamps: "
+            f"{len(self.available_timestamps)}"
+        )
 
     def _scan_available_timestamps(self) -> Dict[int, str]:
         """
@@ -150,9 +253,26 @@ class BEVProbLoader:
         ts_map = {}
         prefix = f"{self.k}_"
 
-        # CR step range for this scenario
-        cr_start = self.segment * 150 + 1   # first CR step of scenario
-        cr_end = (self.segment + 1) * 150   # last CR step of scenario
+        # Scenario-specific timestamp mapping function:
+        # key = scenario-internal time step, value = folder path.
+        if self.scenario_family == SCENARIO_USA_INTERSECTION:
+            # CR step range for this scenario
+            cr_start = self.segment * 150 + 1   # first CR step of scenario
+            cr_end = (self.segment + 1) * 150   # last CR step of scenario
+        elif self.scenario_family == SCENARIO_CHN_MERGING:
+            # For CHN_Merging: scenario start timestamp index in folder naming
+            #   base_ts = 10 * scenario_id + 59
+            chn_base_ts = (
+                CHN_MERGING_SCENARIO_STRIDE * int(self.scenario_id)
+                + CHN_MERGING_BASE_OFFSET
+            )
+        elif self.scenario_family == SCENARIO_DEU_ROUNDABOUT:
+            # DEU_Roundabout: folders named {segment_id}_{timestamp_idx}.
+            # timestamp_idx is in MTSDB step units (~100ms).
+            # Map: scenario_ts ≈ timestamp_idx - base_ts (both in 100ms units).
+            deu_base_ts = self._roundabout_base_ts
+        else:
+            return {}
 
         for folder_name in os.listdir(self.bev_prob_dir):
             if not folder_name.startswith(prefix):
@@ -162,11 +282,25 @@ class BEVProbLoader:
             except ValueError:
                 continue
 
-            cr_step = timestamp_ms // 100
-            if cr_start <= cr_step <= cr_end:
-                scenario_ts = cr_step - cr_start  # 0-based scenario time step
-                folder_path = os.path.join(self.bev_prob_dir, folder_name)
-                if os.path.isdir(folder_path):
+            folder_path = os.path.join(self.bev_prob_dir, folder_name)
+            if not os.path.isdir(folder_path):
+                continue
+
+            if self.scenario_family == SCENARIO_USA_INTERSECTION:
+                cr_step = timestamp_ms // 100
+                if cr_start <= cr_step <= cr_end:
+                    scenario_ts = cr_step - cr_start  # 0-based scenario time step
+                    ts_map[scenario_ts] = folder_path
+            elif self.scenario_family == SCENARIO_CHN_MERGING:
+                # timestamp_ms here is actually an index in folder naming (e.g. 69, 79, ...).
+                scenario_ts = timestamp_ms - chn_base_ts
+                if scenario_ts >= 0:
+                    ts_map[scenario_ts] = folder_path
+            elif self.scenario_family == SCENARIO_DEU_ROUNDABOUT:
+                # timestamp_ms is the MTSDB step index.
+                # Map to scenario-relative time step (both in 100ms units).
+                scenario_ts = timestamp_ms - deu_base_ts
+                if scenario_ts >= 0:
                     ts_map[scenario_ts] = folder_path
 
         return ts_map

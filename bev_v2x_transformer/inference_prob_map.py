@@ -24,8 +24,8 @@ from Main import MainModel
 from data_loader_v4 import TrainDataset
 
 # ================= 配置区 =================
-MODEL_PATH = "model_turbo_epoch_80.pth"
-OUTPUT_ROOT = "./BEVPredProb"          # 父文件夹
+MODEL_PATH = "roundabout_model_turbo_epoch_140.pth"
+OUTPUT_ROOT = "./roundaboutBEVPredProb"          # 父文件夹
 T_KEYS = ["T1", "T2", "T3"]           # 三个时刻的文件名前缀
 MAX_SAMPLES = None  # 设为 None 处理全部样本
 # ==========================================
@@ -39,7 +39,7 @@ def main():
     os.makedirs(OUTPUT_ROOT, exist_ok=True)
 
     # 1. 加载数据
-    data_path = "./BEVData_01"
+    data_path = "./roundabout/BEVData"
     if not os.path.exists(data_path):
         print(f"Data directory not found: {data_path}")
         return

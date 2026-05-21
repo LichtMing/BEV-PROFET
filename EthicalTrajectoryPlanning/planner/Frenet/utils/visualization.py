@@ -30,7 +30,9 @@ from planner.Frenet.utils.frenet_functions import FrenetTrajectory
 warnings.filterwarnings("ignore", category=matplotlib.cbook.mplDeprecation)
 
 plt.rcParams["figure.figsize"] = (8, 8)
-plt.rc("grid", linewidth=0.5, alpha=0.7)
+plt.rcParams["figure.facecolor"] = "white"
+plt.rcParams["axes.facecolor"] = "white"
+plt.rcParams["axes.grid"] = False
 module_path = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 )
@@ -230,7 +232,35 @@ def animate_scenario(
             obj=scenario,
             ax=ax1,
             plot_limits=plot_limits,
-            draw_params={"time_begin": int(j / (scenario.dt * fps_available))},
+            draw_params={
+                "time_begin": int(j / (scenario.dt * fps_available)),
+                "scenario": {
+                    "lanelet_network": {
+                        "lanelet": {
+                            "facecolor": "#E2E2E2",
+                            "fill_lanelet": True,
+                            "left_bound_color": "black",
+                            "right_bound_color": "black",
+                            "draw_linewidth": 1.0,
+                        },
+                        "intersection": {
+                            "draw_intersections": False,
+                            "draw_incoming_lanelets": False,
+                            "draw_crossings": False,
+                            "draw_successors": False
+                        }
+                    },
+                    "dynamic_obstacle": {
+                        "shape": {
+                            "rectangle": {
+                                "facecolor": "#EB7E98",
+                                "edgecolor": "black",
+                                "linewidth": 1.0,
+                            }
+                        }
+                    }
+                }
+            },
         )
 
         # draw the planning problme
@@ -242,7 +272,7 @@ def animate_scenario(
                 draw_params={"time_begin": int(j / (scenario.dt * fps_available))},
             )
 
-        # draw the ego vehicle in green
+        # draw the ego vehicle in deep blue
         # and put the ego vehicle in the center of the plot
         if marked_vehicles is not None:
             for marked_vehicle in marked_vehicles:
@@ -253,7 +283,15 @@ def animate_scenario(
                         plot_limits=plot_limits,
                         draw_params={
                             "time_begin": int(j / (scenario.dt * fps_available)),
-                            "facecolor": "g",
+                            "dynamic_obstacle": {
+                                "shape": {
+                                    "rectangle": {
+                                        "facecolor": "#2C7BB6",
+                                        "edgecolor": "black",
+                                        "linewidth": 1.0,
+                                    }
+                                }
+                            }
                         },
                     )
                     if animation_area is not None:
@@ -951,12 +989,36 @@ def draw_scenario(
         scenario,
         draw_params={
             "time_begin": time_step,
-            "dynamic_obstacle": {
-                "draw_shape": True,
-                "draw_bounding_box": True,
-                "draw_icon": False,
-                "show_label": show_label,
-            },
+            "scenario": {
+                "lanelet_network": {
+                    "lanelet": {
+                        "facecolor": "#E2E2E2",
+                        "fill_lanelet": True,
+                        "left_bound_color": "black",
+                        "right_bound_color": "black",
+                        "draw_linewidth": 1.0,
+                    },
+                    "intersection": {
+                        "draw_intersections": False,
+                        "draw_incoming_lanelets": False,
+                        "draw_crossings": False,
+                        "draw_successors": False
+                    }
+                },
+                "dynamic_obstacle": {
+                    "draw_shape": True,
+                    "draw_bounding_box": True,
+                    "draw_icon": False,
+                    "show_label": show_label,
+                    "shape": {
+                        "rectangle": {
+                            "facecolor": "#EB7E98",
+                            "edgecolor": "black",
+                            "linewidth": 1.0,
+                        }
+                    }
+                }
+            }
         },
         ax=ax,
     )
@@ -972,13 +1034,20 @@ def draw_scenario(
             obj=scenario.obstacle_by_id(marked_vehicle),
             draw_params={
                 "time_begin": time_step,
-                "facecolor": "g",
                 "dynamic_obstacle": {
-                    "draw_shape": False,
-                    "draw_bounding_box": False,
-                    "draw_icon": True,
+                    "draw_shape": True,
+                    "draw_bounding_box": True,
+                    "draw_icon": False,
+                    "shape": {
+                        "rectangle": {
+                            "facecolor": "#2C7BB6",
+                            "edgecolor": "black",
+                            "linewidth": 1.0,
+                        }
+                    }
                 },
             },
+            ax=ax,
         )
 
     # Draw global path
@@ -1084,7 +1153,7 @@ def draw_bev_scenario(
     if draw_grid:
         ax.set_xticks(np.arange(driven_traj[-1].position[0] - 50.25, driven_traj[-1].position[0] + 50.25, 0.5))
         ax.set_yticks(np.arange(driven_traj[-1].position[1] - 50.25, driven_traj[-1].position[1] + 50.25, 0.5))
-        ax.grid(True)
+        ax.grid(False)
         ax.set_xticklabels([])
         ax.set_yticklabels([])
     # plot the scenario at the current time step
@@ -1106,26 +1175,50 @@ def draw_bev_scenario(
         draw_params={
             "time_begin": ego_time_step,
             "time_end": ego_traj_time_end,
-            "dynamic_obstacle": {
-                "draw_shape": True,
-                "draw_bounding_box": True,
-                "draw_icon": False,
-                "show_label": show_label,
-                "identify_ego": True,
-                "occupancy": {
-                  'draw_occupancies': -1,
+            "scenario": {
+                "lanelet_network": {
+                    "lanelet": {
+                        "facecolor": "#E2E2E2",
+                        "fill_lanelet": True,
+                        "left_bound_color": "black",
+                        "right_bound_color": "black",
+                        "draw_linewidth": 1.0,
+                    },
+                    "intersection": {
+                        "draw_intersections": False,
+                        "draw_incoming_lanelets": False,
+                        "draw_crossings": False,
+                        "draw_successors": False
+                    }
                 },
-                "ego_info": {
-                    "ego_id": ego_id,
-                    "ego_time_begin": ego_time_step,
-                    "ego_draw_occ": ego_draw_occ,
-                    "ego_draw_shape": True,
-                    "ego_draw_traj": False,
-                    "ego_color": "#4BACC6",
-                    'ego_linestyle': "dashed",
-                    "ego_traj_time_begin": int(ego_traj_time_begin),
-                    "ego_traj_time_end": int(ego_traj_time_end),
-                    "ego_occ": occ_list,
+                "dynamic_obstacle": {
+                    "draw_shape": True,
+                    "draw_bounding_box": True,
+                    "draw_icon": False,
+                    "show_label": show_label,
+                    "identify_ego": True,
+                    "shape": {
+                        "rectangle": {
+                            "facecolor": "#EB7E98",
+                            "edgecolor": "black",
+                            "linewidth": 1.0,
+                        }
+                    },
+                    "occupancy": {
+                      'draw_occupancies': -1,
+                    },
+                    "ego_info": {
+                        "ego_id": ego_id,
+                        "ego_time_begin": ego_time_step,
+                        "ego_draw_occ": ego_draw_occ,
+                        "ego_draw_shape": True,
+                        "ego_draw_traj": False,
+                        "ego_color": "#2C7BB6",
+                        'ego_linestyle': "dashed",
+                        "ego_traj_time_begin": int(ego_traj_time_begin),
+                        "ego_traj_time_end": int(ego_traj_time_end),
+                        "ego_occ": occ_list,
+                    }
                 }
             },
             'trajectory': {'draw_trajectory': False,
@@ -1136,6 +1229,31 @@ def draw_bev_scenario(
         },
         ax=ax,
     )
+    
+    # Draw ego vehicle explicitly with deep blue color
+    if ego_id != -1 and scenario.obstacle_by_id(ego_id) is not None:
+        draw_object(
+            obj=scenario.obstacle_by_id(ego_id),
+            draw_params={
+                "time_begin": ego_time_step,
+                "time_end": ego_traj_time_end,
+                "dynamic_obstacle": {
+                    "draw_shape": True,
+                    "draw_bounding_box": True,
+                    "draw_icon": False,
+                    "show_label": show_label,
+                    "shape": {
+                        "rectangle": {
+                            "facecolor": "#2C7BB6",
+                            "edgecolor": "black",
+                            "linewidth": 1.0,
+                        }
+                    }
+                }
+            },
+            ax=ax,
+        )
+
     # Draw ego trajectory occupancy footprints (occ_list) directly on ax,
     # since commonroad's draw_object does not handle the custom "ego_info" params.
     if ego_draw_occ and len(occ_list) > 0:
@@ -1143,8 +1261,8 @@ def draw_bev_scenario(
         occ_vertices = [np.array(occ.shape.vertices) for occ in occ_list]
         occ_collection = mc.PolyCollection(
             occ_vertices, closed=True, zorder=21,
-            facecolor="#4BACC6", edgecolor="#2F7F9E", alpha=0.35,
-            linewidth=0.5, antialiased=True,
+            facecolor="#2C7BB6", edgecolor="black", alpha=0.35,
+            linewidth=1.0, antialiased=True,
         )
         ax.add_collection(occ_collection)
 
@@ -1198,7 +1316,27 @@ def draw_global_map(
     # plot the scenario at the current time step
     plot_limits = get_plot_limits_from_scenario(scenario=scenario)
 
-    draw_object(scenario.lanelet_network, plot_limits=plot_limits)
+    draw_object(
+        scenario.lanelet_network,
+        plot_limits=plot_limits,
+        draw_params={
+            "lanelet_network": {
+                "lanelet": {
+                    "facecolor": "#E2E2E2",
+                    "fill_lanelet": True,
+                    "left_bound_color": "black",
+                    "right_bound_color": "black",
+                    "draw_linewidth": 1.0,
+                },
+                "intersection": {
+                    "draw_intersections": False,
+                    "draw_incoming_lanelets": False,
+                    "draw_crossings": False,
+                    "draw_successors": False
+                }
+            }
+        }
+    )
     ax.set_aspect("equal")
     ax.axis("off")
     plt.subplots_adjust(top=1, bottom=0, right=1, left=0, hspace=0, wspace=0)
@@ -1255,23 +1393,47 @@ def draw_future_situations(
             draw_params={
                 "time_begin": current_time_step + len(occ_list),
                 "time_end": current_time_step + len(occ_list),
-                "dynamic_obstacle": {
-                    "draw_shape": True,
-                    "draw_bounding_box": True,
-                    "draw_icon": False,
-                    "show_label": show_label,
-                    "identify_ego": True,
-                    "ego_info": {
-                        "ego_id": ego_id,
-                        "ego_time_begin": current_time_step + len(occ_list),
-                        "ego_draw_occ": ego_draw_occ,
-                        "ego_draw_shape": False,
-                        "ego_draw_traj": False,
-                        "ego_color": "#800080",
-                        "ego_linestyle": "dashed",
-                        "ego_traj_time_begin": current_time_step,
-                        "ego_traj_time_end": current_time_step + len(occ_list),
-                        "ego_occ": occ_list
+                "scenario": {
+                    "lanelet_network": {
+                        "lanelet": {
+                            "facecolor": "#E2E2E2",
+                            "fill_lanelet": True,
+                            "left_bound_color": "black",
+                            "right_bound_color": "black",
+                            "draw_linewidth": 1.0,
+                        },
+                        "intersection": {
+                            "draw_intersections": False,
+                            "draw_incoming_lanelets": False,
+                            "draw_crossings": False,
+                            "draw_successors": False
+                        }
+                    },
+                    "dynamic_obstacle": {
+                        "draw_shape": True,
+                        "draw_bounding_box": True,
+                        "draw_icon": False,
+                        "show_label": show_label,
+                        "identify_ego": True,
+                        "shape": {
+                            "rectangle": {
+                                "facecolor": "#EB7E98",
+                                "edgecolor": "black",
+                                "linewidth": 1.0,
+                            }
+                        },
+                        "ego_info": {
+                            "ego_id": ego_id,
+                            "ego_time_begin": current_time_step + len(occ_list),
+                            "ego_draw_occ": ego_draw_occ,
+                            "ego_draw_shape": False,
+                            "ego_draw_traj": False,
+                            "ego_color": "#2C7BB6",
+                            "ego_linestyle": "dashed",
+                            "ego_traj_time_begin": current_time_step,
+                            "ego_traj_time_end": current_time_step + len(occ_list),
+                            "ego_occ": occ_list
+                        }
                     }
                 },
                 'trajectory': {'draw_trajectory': True,
@@ -1282,6 +1444,31 @@ def draw_future_situations(
             },
             ax=ax,
         )
+        
+        # Draw ego vehicle explicitly with deep blue color
+        if ego_id != -1 and scenario.obstacle_by_id(ego_id) is not None:
+            draw_object(
+                obj=scenario.obstacle_by_id(ego_id),
+                draw_params={
+                    "time_begin": current_time_step + len(occ_list),
+                    "time_end": current_time_step + len(occ_list),
+                    "dynamic_obstacle": {
+                        "draw_shape": True,
+                        "draw_bounding_box": True,
+                        "draw_icon": False,
+                        "show_label": show_label,
+                        "shape": {
+                            "rectangle": {
+                                "facecolor": "#2C7BB6",
+                                "edgecolor": "black",
+                                "linewidth": 1.0,
+                            }
+                        }
+                    }
+                },
+                ax=ax,
+            )
+
         ax.set_aspect("equal")
         ax.axis("off")
         plt.subplots_adjust(top=1, bottom=0, right=1, left=0, hspace=0, wspace=0)

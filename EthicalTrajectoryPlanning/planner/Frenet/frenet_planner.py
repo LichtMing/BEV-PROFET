@@ -123,6 +123,10 @@ class FrenetPlanner(Planner):
             log_path=f"./planner/Frenet/results/logs/{scenario.benchmark_id}.csv"
         )
 
+        # Ensure saved_fig/<scenario>/ directory exists (auto-create like create_saved_fig_dirs.py)
+        self.saved_fig_dir = os.path.join("../../saved_fig", scenario.benchmark_id)
+        os.makedirs(self.saved_fig_dir, exist_ok=True)
+
         try:
             with Timeout(1000, "Frenet Planner initialization"):
 
@@ -180,10 +184,12 @@ class FrenetPlanner(Planner):
                                      "bev_v2x_transformer", "BEVPredProb")
                     )
                     bev_weight = settings["active_learning"].get("bev_weight", 1.0)
+                    scenario_geometry = settings["active_learning"].get("bev_scenario_geometry", None)
                     self.bev_prob_loader = BEVProbLoader(
                         bev_prob_dir=bev_prob_dir,
                         benchmark_id=scenario.benchmark_id,
                         bev_weight=bev_weight,
+                        scenario_geometry=scenario_geometry,
                     )
                     if self.prepare_fig_data:
                         self.saved_global_path = []
@@ -341,12 +347,15 @@ class FrenetPlanner(Planner):
                     if settings is not None and "active_learning" in settings:
                         bev_prob_dir = settings["active_learning"].get("bev_prob_dir", bev_prob_dir)
                         bev_weight = settings["active_learning"].get("bev_weight", 1.0)
+                        scenario_geometry = settings["active_learning"].get("bev_scenario_geometry", None)
                     else:
                         bev_weight = 1.0
+                        scenario_geometry = None
                     self.bev_prob_loader = BEVProbLoader(
                         bev_prob_dir=bev_prob_dir,
                         benchmark_id=scenario.benchmark_id,
                         bev_weight=bev_weight,
+                        scenario_geometry=scenario_geometry,
                     )
 
                 self.initial_step = scenario.obstacle_by_id(self.ego_id).initial_state.time_step
@@ -357,7 +366,7 @@ class FrenetPlanner(Planner):
                     self.reference_traj = copy.deepcopy(scenario.obstacle_by_id(
                         self.ego_id
                     ).prediction.trajectory)
-                    eval_save_dir = os.path.join("../../saved_fig", scenario.benchmark_id)
+                    eval_save_dir = self.saved_fig_dir
                     self.gt_traj_logger = TrajLogger(log_prefix="car " + str(self.ego_id) + " dataset", points_num=self.traj_length * 3, save_dir=eval_save_dir)
                     self.search_traj_logger = TrajLogger(log_prefix="car " + str(self.ego_id) + " search tree", points_num=self.traj_length * 3, save_dir=eval_save_dir)
                     self.exec_timer.stop_timer("initialization/total")
@@ -380,7 +389,7 @@ class FrenetPlanner(Planner):
 
     def save_ego_speed_curve(self, time_step: int, suffix: str = "speed_curve"):
         """Save ego speed curve under saved_fig/<scenario>/ for the current ego."""
-        save_dir = os.path.join("../../saved_fig", self.scenario.benchmark_id)
+        save_dir = self.saved_fig_dir
         os.makedirs(save_dir, exist_ok=True)
 
         driven_t, driven_v = self._extract_speed_series(self.driven_traj)
@@ -574,7 +583,7 @@ class FrenetPlanner(Planner):
                                   ego_id=self.ego_id, valid_trajs=valid_trajectories, tree_ax=ax)
 
                     time_c = time.time()
-                    fig.savefig(os.path.join("../../saved_fig", self.scenario.benchmark_id, str(self.ego_id) + "_" + str(self.ego_state.time_step) + "_tree.png"),
+                    fig.savefig(os.path.join(self.saved_fig_dir, str(self.ego_id) + "_" + str(self.ego_state.time_step) + "_tree.png"),
                                 dpi=900)
                     plt.close(fig)
 
@@ -656,7 +665,7 @@ class FrenetPlanner(Planner):
                         ego_traj_time_end=self.ego_state.time_step,
                         ego_draw_occ=False,
                         predictions=self.predictions,
-                        save_filename=os.path.join("../../saved_fig", self.scenario.benchmark_id, str(self.ego_id) + "_" + str(self.ego_state.time_step) + "_scenario.png"),
+                        save_filename=os.path.join(self.saved_fig_dir, str(self.ego_id) + "_" + str(self.ego_state.time_step) + "_scenario.png"),
 
                     )
                     plt.close('all')
@@ -679,7 +688,7 @@ class FrenetPlanner(Planner):
                         ego_traj_time_begin=self.ego_state.time_step + len(best_traj),
                         ego_traj_time_end=self.ego_state.time_step + len(best_traj),
                         ego_draw_occ=True,
-                        save_filename=os.path.join("../../saved_fig", self.scenario.benchmark_id,
+                        save_filename=os.path.join(self.saved_fig_dir,
                                                    str(self.ego_id) + "_" + str(
                                                        self.ego_state.time_step) + "_best_traj_occ.png"),
                     )
@@ -702,7 +711,7 @@ class FrenetPlanner(Planner):
                         ego_traj_time_begin=self.ego_state.time_step+ len(gt_traj),
                         ego_traj_time_end=self.ego_state.time_step + len(gt_traj),
                         ego_draw_occ=True,
-                        save_filename=os.path.join("../../saved_fig", self.scenario.benchmark_id,
+                        save_filename=os.path.join(self.saved_fig_dir,
                                                    str(self.ego_id) + "_" + str(
                                                        self.ego_state.time_step) + "_gt_traj_occ.png"),
                     )
@@ -751,7 +760,7 @@ class FrenetPlanner(Planner):
                                                    show_label=True,
                                                    ego_draw_occ=True,
                                                    future_ft_lists=tc_collecter,
-                                                   scenario_path=os.path.join("../../saved_sfig", str(self.scenario.benchmark_id))
+                                                   scenario_path=self.saved_fig_dir
                                                    )
                         plt.close('all')
 

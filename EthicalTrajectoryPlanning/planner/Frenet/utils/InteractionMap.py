@@ -229,12 +229,12 @@ class InteractionMap(object):
         for i, (radius_m, mpp) in enumerate(self.res_bands):
             if ad <= radius_m:
                 cumul += (ad - prev_r) / mpp
-                return int(math.floor(sign * cumul + self._half_pixels))
+                return int(sign * cumul + self._half_pixels)
             cumul += (radius_m - prev_r) / mpp
             prev_r = radius_m
         # Beyond last band — extrapolate with last resolution
         cumul += (ad - prev_r) / self.res_bands[-1][1]
-        return int(math.floor(sign * cumul + self._half_pixels))
+        return int(sign * cumul + self._half_pixels)
 
     def _coord_to_pixel_linear_1d(self, d: float) -> int:
         """Logarithmic compression: Δs(d) = a + b·d."""
@@ -246,7 +246,7 @@ class InteractionMap(object):
             px = ad / a
         else:
             px = (1.0 / b) * math.log(1.0 + b * ad / a)
-        return int(math.floor(sign * px + self._half_pixels))
+        return int(sign * px + self._half_pixels)
 
     def _pixel_to_coord_1d(self, px: int) -> float:
         """Inverse: pixel index → signed distance in m."""
@@ -256,7 +256,7 @@ class InteractionMap(object):
 
     def _pixel_to_coord_bands_1d(self, px: int) -> float:
         """Inverse for piecewise-linear bands."""
-        p = (px + 0.5) - self._half_pixels
+        p = px - self._half_pixels
         sign = 1 if p >= 0 else -1
         ap = abs(p)
         prev_r = 0.0
@@ -271,7 +271,7 @@ class InteractionMap(object):
 
     def _pixel_to_coord_linear_1d(self, px: int) -> float:
         """Inverse for linear-growth mode: d = (a/b)·(exp(b·p) − 1)."""
-        p = (px + 0.5) - self._half_pixels
+        p = px - self._half_pixels
         sign = 1 if p >= 0 else -1
         ap = abs(p)
         a = self.size
@@ -360,26 +360,17 @@ class InteractionMap(object):
                 else:
                     if trajectory.uncertainty_list is not None and grid_risk > 0.1:
                         unc_idx = min(i - 1, len(trajectory.uncertainty_list) - 1)
-                        w = 4 + self.confidence_width(trajectory.uncertainty_list[unc_idx]) + speed_w_bonus
+                        rr, cc, vals = weighted_line(*pixel_position_1, *pixel_position_2, w=4+self.confidence_width(trajectory.uncertainty_list[unc_idx]) + speed_w_bonus,
+                                                     rmin=0, rmax=grid_max)
                     else:
-                        w = 5 + speed_w_bonus
-
-                    if self.adaptive:
-                        # Scale rasterization width inversely with local metric grid size
-                        # to prevent lines from becoming physically massive in low-res areas.
-                        mid_r = (pixel_position_1[0] + pixel_position_2[0]) // 2
-                        mid_c = (pixel_position_1[1] + pixel_position_2[1]) // 2
-                        local_mpp = (self._mpp_at_pixel_1d(mid_r) + self._mpp_at_pixel_1d(mid_c)) / 2.0
-                        w = max(1.0, w * (self.size / local_mpp))
-
-                    rr, cc, vals = weighted_line(*pixel_position_1, *pixel_position_2, w=w, rmin=0, rmax=grid_max)
+                        rr, cc, vals = weighted_line(*pixel_position_1, *pixel_position_2, w=5 + speed_w_bonus, rmin=0, rmax=grid_max)
 
                     # Clamp columns to valid range
                     mask = (cc >= 0) & (cc < grid_max)
                     rr, cc, vals = rr[mask], cc[mask], vals[mask]
 
                     self.risk_map[rr, cc] += effective_risk * vals
-                    self.visited_map[rr, cc] += vals  # Crucial fix: update visited by fractional weights
+                    self.visited_map[rr, cc] += 1
 
                 if draw_tree_ax is not None:
                     draw_tree_ax.plot([p1[0], p2[0]], [p1[1], p2[1]], c=self.cmap(grid_risk - 0.001 if grid_risk == 1 else grid_risk), linewidth=2.5, zorder=25)
@@ -496,31 +487,24 @@ class InteractionMap(object):
             rows, cols = pixel_to_plot
             gx = np.array([self._pixel_to_coord_1d(int(r)) for r in rows]) + self.ego_center[0]
             gy = np.array([self._pixel_to_coord_1d(int(c)) for c in cols]) + self.ego_center[1]
+        if self.adaptive:
+            # Non-linear pixel → world position + variable marker sizes
+            rows, cols = pixel_to_plot
+            gx = np.array([self._pixel_to_coord_1d(int(r)) for r in rows]) + self.ego_center[0]
+            gy = np.array([self._pixel_to_coord_1d(int(c)) for c in cols]) + self.ego_center[1]
+            global_positions = (gx, gy)
+            # Each pixel's marker area scales with the square of its local
+            # meters-per-pixel so that cells visually fill their physical area.
+            base_s = (200. / fig.dpi) ** 2   # base size for 0.5 m/px
             mpp_row = np.array([self._mpp_at_pixel_1d(int(r)) for r in rows])
             mpp_col = np.array([self._mpp_at_pixel_1d(int(c)) for c in cols])
-            
-            rects = [Rectangle((x - w/2, y - h/2), w, h) for x, y, w, h in zip(gx, gy, mpp_row, mpp_col)]
+            mpp_max = np.maximum(mpp_row, mpp_col)
+            sizes = base_s * (mpp_max / self.size) ** 2
         else:
             global_positions = pixel_to_plot * np.array(self.size) + self.origin[:, np.newaxis]
-            gx, gy = global_positions[0], global_positions[1]
-            w = self.size
-            if isinstance(w, tuple) or isinstance(w, list) or isinstance(w, np.ndarray):
-                w_x, w_y = w[0], w[1]
-            else:
-                w_x = w_y = w
-            rects = [Rectangle((x - w_x/2, y - w_y/2), w_x, w_y) for x, y in zip(gx, gy)]
-
-        # Added edgecolors and linewidths to clearly separate the grid cells
-        pc = PatchCollection(rects, facecolors=colors, edgecolors='black', linewidths=0.2, alpha=0.8, zorder=25)
-        ax.add_collection(pc)
-        # try:
-        #     shape = alphashape.alphashape(list(zip(global_positions[0], global_positions[1])))
-        # except:
-        #     print("hello")
-        # shape_x, shape_y = shape.exterior.coords.xy
-        # ax.plot(shape_x, shape_y, 'o', color='red', markersize=4)
-        # plt.colorbar(a1, ax=ax)
-        # self.draw_traj(best_traj, worst_traj, ax)
+            global_positions = (global_positions[0], global_positions[1])
+            sizes = (200. / fig.dpi) ** 2
+        a1 = ax.scatter(global_positions[0], global_positions[1], s=sizes, marker='s', c=self.cmap(self.risk_map[pixel_to_plot]), alpha=0.8, zorder=25)
         filepath = os.path.join("../../saved_fig", filename)
         dir_path = os.path.split(filepath)[0]
         if not os.path.exists(dir_path):

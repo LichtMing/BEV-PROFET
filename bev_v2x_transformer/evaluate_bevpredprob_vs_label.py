@@ -4,9 +4,9 @@ import os
 import numpy as np
 
 
-PRED_ROOT = "BEVPredProb"
-LABEL_ROOT = "BEVLabel_01"
-OUT_JSON = "bevpredprob_vs_bevlabel_eval.json"
+PRED_ROOT = "mergingBEVPredProb"
+LABEL_ROOT = "./merging/BEVLabel"
+OUT_JSON = "mergingbevpredprob_vs_bevlabel_eval.json"
 
 # pred T1/T2/T3 对齐 label channel 2/3/4
 HORIZONS = [("T1", 2), ("T2", 3), ("T3", 4)]

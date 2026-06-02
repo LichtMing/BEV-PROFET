@@ -83,6 +83,37 @@ from risk_assessment.visualization.risk_visualization import (
 from risk_assessment.visualization.risk_dashboard import risk_dashboard
 
 
+def _resolve_bev_dir(bev_config_value, benchmark_id):
+    """Resolve bev_prob_dir from config value.
+
+    - dict  : match by scenario family prefix, return path or None
+    - str "": None (disable BEV)
+    - str path: return as-is (manual override)
+
+    Returns:
+        resolved_path or None
+    """
+    if bev_config_value is None:
+        return None
+
+    if isinstance(bev_config_value, dict):
+        for prefix, path in bev_config_value.items():
+            if benchmark_id.startswith(prefix):
+                return path
+        print(
+            f"[BEV] Warning: benchmark_id '{benchmark_id}' does not match "
+            f"any key in bev_prob_dir config. BEV disabled."
+        )
+        return None
+
+    if isinstance(bev_config_value, str):
+        if bev_config_value == "":
+            return None
+        return bev_config_value
+
+    return None
+
+
 class FrenetPlanner(Planner):
     """Jerk optimal planning in frenet coordinates with quintic polynomials in lateral direction and quartic polynomials in longitudinal direction."""
 
@@ -178,19 +209,19 @@ class FrenetPlanner(Planner):
                     self.tc_ego_id = settings["active_learning"]["tc_ego_id"]
                     self.tc_target = settings["active_learning"]["tc_target"]
                     # Initialize BEV probability loader for risk overlay
-                    bev_prob_dir = settings["active_learning"].get(
-                        "bev_prob_dir",
-                        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
-                                     "bev_v2x_transformer", "BEVPredProb")
-                    )
-                    bev_weight = settings["active_learning"].get("bev_weight", 1.0)
-                    scenario_geometry = settings["active_learning"].get("bev_scenario_geometry", None)
-                    self.bev_prob_loader = BEVProbLoader(
-                        bev_prob_dir=bev_prob_dir,
-                        benchmark_id=scenario.benchmark_id,
-                        bev_weight=bev_weight,
-                        scenario_geometry=scenario_geometry,
-                    )
+                    bev_config_value = settings["active_learning"].get("bev_prob_dir", None)
+                    bev_prob_dir = _resolve_bev_dir(bev_config_value, scenario.benchmark_id)
+                    if bev_prob_dir is not None:
+                        bev_weight = settings["active_learning"].get("bev_weight", 1.0)
+                        scenario_geometry = settings["active_learning"].get("bev_scenario_geometry", None)
+                        self.bev_prob_loader = BEVProbLoader(
+                            bev_prob_dir=bev_prob_dir,
+                            benchmark_id=scenario.benchmark_id,
+                            bev_weight=bev_weight,
+                            scenario_geometry=scenario_geometry,
+                        )
+                    else:
+                        self.bev_prob_loader = None
                     if self.prepare_fig_data:
                         self.saved_global_path = []
                         self.saved_hist_traj = []
@@ -340,23 +371,24 @@ class FrenetPlanner(Planner):
 
                 # Initialize BEV probability loader for risk overlay (both modes)
                 if not self.active_learning:
-                    bev_prob_dir = os.path.join(
-                        os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
-                        "bev_v2x_transformer", "BEVPredProb"
-                    )
                     if settings is not None and "active_learning" in settings:
-                        bev_prob_dir = settings["active_learning"].get("bev_prob_dir", bev_prob_dir)
+                        bev_config_value = settings["active_learning"].get("bev_prob_dir", None)
                         bev_weight = settings["active_learning"].get("bev_weight", 1.0)
                         scenario_geometry = settings["active_learning"].get("bev_scenario_geometry", None)
                     else:
+                        bev_config_value = None
                         bev_weight = 1.0
                         scenario_geometry = None
-                    self.bev_prob_loader = BEVProbLoader(
-                        bev_prob_dir=bev_prob_dir,
-                        benchmark_id=scenario.benchmark_id,
-                        bev_weight=bev_weight,
-                        scenario_geometry=scenario_geometry,
-                    )
+                    bev_prob_dir = _resolve_bev_dir(bev_config_value, scenario.benchmark_id)
+                    if bev_prob_dir is not None:
+                        self.bev_prob_loader = BEVProbLoader(
+                            bev_prob_dir=bev_prob_dir,
+                            benchmark_id=scenario.benchmark_id,
+                            bev_weight=bev_weight,
+                            scenario_geometry=scenario_geometry,
+                        )
+                    else:
+                        self.bev_prob_loader = None
 
                 self.initial_step = scenario.obstacle_by_id(self.ego_id).initial_state.time_step
                 self.final_step = scenario.obstacle_by_id(self.ego_id).prediction.final_time_step
@@ -373,15 +405,15 @@ class FrenetPlanner(Planner):
         except ExecutionTimeoutError:
             raise TimeoutError
 
-    def _extract_speed_series(self, states):
-        """Convert a list of states to time-speed arrays in SI units."""
+    def _extract_speed_series(self, states, dt: float):
+        """Convert a list of states to time-speed arrays using state.time_step * dt."""
         times_s = []
         speeds_mps = []
         for state in states:
-            if not hasattr(state, "time_step") or not hasattr(state, "velocity"):
+            if not hasattr(state, "velocity"):
                 continue
             try:
-                times_s.append(float(state.time_step) * float(self.scenario.dt))
+                times_s.append(float(state.time_step) * dt)
                 speeds_mps.append(float(state.velocity))
             except (TypeError, ValueError):
                 continue
@@ -392,22 +424,22 @@ class FrenetPlanner(Planner):
         save_dir = self.saved_fig_dir
         os.makedirs(save_dir, exist_ok=True)
 
-        driven_t, driven_v = self._extract_speed_series(self.driven_traj)
+        scenario_dt = self.scenario.dt
+        driven_t, driven_v = self._extract_speed_series(self.driven_traj, scenario_dt)
         if len(driven_t) == 0:
             return
 
-        fig, ax = plt.subplots(figsize=(8, 3.5))
+        fig, ax = plt.subplots(figsize=(16, 9))
         ax.plot(driven_t, driven_v, color="#d62728", linewidth=2.0, label="ego driven")
 
         if self.active_learning and hasattr(self, "reference_traj"):
-            ref_t, ref_v = self._extract_speed_series(self.reference_traj.state_list)
+            ref_t, ref_v = self._extract_speed_series(self.reference_traj.state_list, scenario_dt)
             if len(ref_t) > 0:
                 ax.plot(ref_t, ref_v, color="#1f77b4", linewidth=1.5, linestyle="--", label="ego reference")
-
         ax.scatter([driven_t[-1]], [driven_v[-1]], color="#d62728", s=18)
         ax.set_xlabel("Time [s]")
         ax.set_ylabel("Speed [m/s]")
-        ax.set_title(f"Ego {self.ego_id} Speed Curve (t={time_step})")
+        ax.set_title(f"Ego {self.ego_id} Speed Curve (t={time_step * self.scenario.dt:.1f}s)")
         ax.grid(True, linestyle=":", alpha=0.35)
         ax.legend(loc="best")
         fig.tight_layout()

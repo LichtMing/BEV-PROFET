@@ -1,7 +1,7 @@
 {
   "harm_mode": "log_reg",
   "sensor_occlusion_model": false,
-  "occlusion_mode" : false,
+  "occlusion_mode" : true,
   "ignore_angle": false,
   "sym_angle": true,
   "reduced_angle_areas": true,
@@ -15,9 +15,9 @@
   "fast_prob_mahalanobis": false,
 
   "figures": {
-    "create_figures": false,
+    "create_figures": true,
     "number_plotted_trajectories": 3
   },
-  "risk_dashboard": false,
+  "risk_dashboard": true,
   "collision_report": true
 }

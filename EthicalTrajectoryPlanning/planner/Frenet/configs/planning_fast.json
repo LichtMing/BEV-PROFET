@@ -24,8 +24,8 @@
     "prepare_numerical_data": false,
     "prepare_label": true,
     "save_irl_feature": false,
-    "label_path": "/mnt/e/traj_bev/workspacebackup - 副本/EthicalTrajectoryPlanning/label",
-    "fig_path": "/mnt/e/traj_bev/workspacebackup - 副本/EthicalTrajectoryPlanning/figs",
+    "label_path": "/mnt/e/traj_bev/workspace/EthicalTrajectoryPlanning/label",
+    "fig_path": "/mnt/e/traj_bev/workspace/EthicalTrajectoryPlanning/figs",
     "store_interval": 0.5,
     "max_exploration_time": 5.4,
     "search_step": 1.8,
@@ -38,7 +38,11 @@
                   [[0, 0.5], [4.13, 4.13]],
                   [[-0.5, -0.5, 0], [3.66, 3.7, 10.6]],
                   [[0, 0, 0], [0.01, 6.63, 6.63]]],
-    "bev_prob_dir": "/mnt/e/traj_bev/workspacebackup - 副本/bev_v2x_transformer/mergingBEVPredProb",
+    "bev_prob_dir": {
+        "USA_Intersection-1": "/mnt/e/traj_bev/workspace/bev_v2x_transformer/BEVPredProb",
+        "CHN_Merging-1": "/mnt/e/traj_bev/workspace/bev_v2x_transformer/mergingBEVPredProb",
+        "DEU_Roundabout-1": "/mnt/e/traj_bev/workspace/bev_v2x_transformer/roundaboutBEVPredProb"
+    },
     "bev_weight": 1.0,
     "log_bev_prob_stats": true,
     "resolution_mode": "linear",

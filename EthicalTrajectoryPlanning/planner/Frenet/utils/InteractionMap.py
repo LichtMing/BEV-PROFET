@@ -1,6 +1,7 @@
 import math
 import os.path
 import sys
+import time
 import cv2
 import matplotlib.pyplot
 import numpy as np
@@ -163,6 +164,8 @@ class InteractionMap(object):
         self.origin = anchor_state.position - np.array([self.length, self.width]) / 2
         self.rotation = anchor_state.orientation
         self.res = self.length / self.size
+        self.coord_time = 0.0
+        self.viz_time = 0.0
 
         colors = ["#739D2E", "#87BB33", "#FEE599", "#EA700D", "#FF3C3C"]
         nodes = [0.0, 0.25, 0.5, 0.75, 1.0]
@@ -349,8 +352,10 @@ class InteractionMap(object):
 
             if self.in_map_check(p1) and self.in_map_check(p2):
 
+                t0 = time.perf_counter()
                 pixel_position_1 = self.position_to_pixel(p1)
                 pixel_position_2 = self.position_to_pixel(p2)
+                self.coord_time += time.perf_counter() - t0
 
                 if pixel_position_1 == pixel_position_2:
                     r, c = pixel_position_1
@@ -373,7 +378,9 @@ class InteractionMap(object):
                     self.visited_map[rr, cc] += 1
 
                 if draw_tree_ax is not None:
+                    t_viz0 = time.perf_counter()
                     draw_tree_ax.plot([p1[0], p2[0]], [p1[1], p2[1]], c=self.cmap(grid_risk - 0.001 if grid_risk == 1 else grid_risk), linewidth=2.5, zorder=25)
+                    self.viz_time += time.perf_counter() - t_viz0
                 if trajectory.collision_step != -1 and i > trajectory.collision_step:
                     risk_after_collision.append(effective_risk)
                     grid_risk = grid_risk
@@ -421,6 +428,18 @@ class InteractionMap(object):
         relative_position = position - self.origin
         pixel_position = [int(coordinate // self.size) for coordinate in relative_position]
         return pixel_position
+
+    def get_coord_time_ms(self):
+        return self.coord_time * 1000.0
+
+    def reset_coord_time(self):
+        self.coord_time = 0.0
+
+    def get_viz_time_ms(self):
+        return self.viz_time * 1000.0
+
+    def reset_viz_time(self):
+        self.viz_time = 0.0
 
     def rel_position_to_pixel(self, rel_position):
         if self.adaptive:
@@ -528,7 +547,9 @@ class InteractionMap(object):
         for (x, y, s, d, v, yaw) in traj:
             pos = np.asarray([x, y])
             if self.in_map_check(pos):
+                t0 = time.perf_counter()
                 pixel_pos = self.position_to_pixel(pos)
+                self.coord_time += time.perf_counter() - t0
                 r, c = pixel_pos[0], pixel_pos[1]
                 if 0 <= r < grid_max and 0 <= c < grid_max:
                     risk_sum += self.risk_map[r, c]

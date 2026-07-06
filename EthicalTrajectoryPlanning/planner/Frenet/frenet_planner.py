@@ -429,7 +429,7 @@ class FrenetPlanner(Planner):
         if len(driven_t) == 0:
             return
 
-        fig, ax = plt.subplots(figsize=(16, 9))
+        fig, ax = plt.subplots(figsize=(9.0, 3.0))
         ax.plot(driven_t, driven_v, color="#d62728", linewidth=2.0, label="ego driven")
 
         if self.active_learning and hasattr(self, "reference_traj"):
@@ -606,6 +606,12 @@ class FrenetPlanner(Planner):
                                                             speed_risk_factor=self.planning_config.get("speed_risk_factor", 0.02),
                                                             ) for _ in range(3)]
                     valid_trajectories = []
+
+                    # reset coordinate-transform timers before planning
+                    for m in self.interaction_maps:
+                        m.reset_coord_time()
+                        m.reset_viz_time()
+
                     time_a = time.time()
 
                     self.predictions = self.get_prediction()
@@ -615,9 +621,18 @@ class FrenetPlanner(Planner):
                                   ego_id=self.ego_id, valid_trajs=valid_trajectories, tree_ax=ax)
 
                     time_c = time.time()
+                    coord_time_planning = sum(m.get_coord_time_ms() for m in self.interaction_maps)
+                    viz_time_planning = sum(m.get_viz_time_ms() for m in self.interaction_maps)
+
                     fig.savefig(os.path.join(self.saved_fig_dir, str(self.ego_id) + "_" + str(self.ego_state.time_step) + "_tree.png"),
                                 dpi=900)
                     plt.close(fig)
+
+                    # reset coordinate-transform timers before evaluation
+                    for m in self.interaction_maps:
+                        m.reset_coord_time()
+
+                    time_c2 = time.time()
 
                     # profiler = Profiler()
                     # profiler.start()
@@ -648,10 +663,16 @@ class FrenetPlanner(Planner):
                         best_traj, best_traj_risk, worst_traj, worst_traj_risk = find_best_traj(valid_trajs=valid_trajectories,
                                        traj_risk=[traj_risk_calc(t) for t in valid_trajectories])
 
-
+                        coord_time_eval = sum(m.get_coord_time_ms() for m in self.interaction_maps)
 
                         time_d = time.time()
-                        print(time_b - time_a, time_c - time_b, time_d - time_c)
+                        t_pred = time_b - time_a
+                        t_plan = (time_c - time_b) - (coord_time_planning + viz_time_planning) / 1000.0
+                        t_viz = viz_time_planning / 1000.0
+                        t_coord = (coord_time_planning + coord_time_eval) / 1000.0
+                        t_eval = (time_d - time_c2) - coord_time_eval / 1000.0
+                        print("T_pred={:.4f}s T_plan={:.4f}s T_viz={:.4f}s T_coord={:.4f}s T_eval={:.4f}s".format(
+                            t_pred, t_plan, t_viz, t_coord, t_eval))
 
                         eval_res_search = calc_eval_values(self.scenario, self.ego_id, self.time_step, best_traj, self.reference_spline)
 
@@ -659,7 +680,7 @@ class FrenetPlanner(Planner):
                         # print(profiler.output_text(unicode=True, color=True))
 
                         self.search_traj_logger.record_traj(self.ego_id, self.time_step, best_traj, best_traj_risk,
-                                                            eval_res_search, time_b - time_a, time_c - time_b, time_d - time_c)
+                                                            eval_res_search, t_pred, t_plan, t_eval)
 
                         traj_time_step_unit = int(self.frenet_parameters["dt"] / 0.1)
                         gt_states = self.reference_traj.states_in_time_interval(self.time_step + 1, self.time_step + len(best_traj) * traj_time_step_unit)
@@ -1164,7 +1185,7 @@ class FrenetPlanner(Planner):
                                                         risk_value=0,
                                                         update_range=ft.collision_step - 1,
                                                         use_bev_weight=True,
-                                                        # draw_tree_ax=tree_ax,
+                                                        draw_tree_ax=tree_ax,
                                                         )
                 if trajectory_collect_tree is not None:
                     for i, (d_tree, v_tree) in enumerate(trajectory_collect_tree):
@@ -1177,7 +1198,7 @@ class FrenetPlanner(Planner):
                 ft_risk = self.interaction_maps[depth].update_map(trajectory=ft,
                                                             risk_value=0.999,
                                                             use_bev_weight=True,
-                                                            # draw_tree_ax=tree_ax
+                                                            draw_tree_ax=tree_ax
                                                         )
                 collision_risk_sum += ft_risk
                 if trajectory_collect_tree is not None:
@@ -1194,7 +1215,7 @@ class FrenetPlanner(Planner):
                 self.interaction_maps[depth].update_map(trajectory=ft,
                                                         risk_value=0,
                                                         use_bev_weight=True,
-                                                        # draw_tree_ax=tree_ax,
+                                                        draw_tree_ax=tree_ax,
                                                          )
 
                 # profiler.stop()
@@ -1224,7 +1245,7 @@ class FrenetPlanner(Planner):
                 self.interaction_maps[depth].update_map(trajectory=ft,
                                                         risk_value=0.999,
                                                         update_range=ft.collision_step - 1,
-                                                        draw_tree_ax=tree_ax if depth == 1 else None,
+                                                        draw_tree_ax=tree_ax,
                                                         use_bev_weight=True,
                                                                 )
                 if trajectory_collect_tree is not None:
@@ -1237,7 +1258,7 @@ class FrenetPlanner(Planner):
                 print("coll", parent_behavior_path, ft.target_behavior, ft.s[0], ft.s[-1])
                 ft_risk = self.interaction_maps[depth].update_map(trajectory=ft,
                                                             risk_value=0.999,
-                                                            draw_tree_ax=tree_ax if depth == 1 else None,
+                                                            draw_tree_ax=tree_ax,
                                                             use_bev_weight=True,
                                                                   )
                 collision_risk_sum += ft_risk
@@ -1305,7 +1326,7 @@ class FrenetPlanner(Planner):
 
                 self.interaction_maps[depth].update_map(trajectory=ft,
                                                             risk_value=future_risk * self.decay_rate,
-                                                        draw_tree_ax=tree_ax if depth == 1 else None,
+                                                        draw_tree_ax=tree_ax,
                                                         use_bev_weight=True)
                 valid_ft_risk_list.append(future_risk * self.decay_rate)
 

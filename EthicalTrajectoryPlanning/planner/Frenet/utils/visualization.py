@@ -60,6 +60,8 @@ def animate_scenario(
     success: bool = None,
     failure_msg: str = None,
     exec_timer=None,
+    ego_id: int = None,
+    driven_traj: list = None,
 ):
     """
     Animate a commonroad scenario.
@@ -100,6 +102,8 @@ def animate_scenario(
             len(scenario.obstacle_by_id(marked_vehicles[0]).prediction.occupancy_set)
             + 1
         )
+    elif driven_traj is not None:
+        frames = len(driven_traj)
     elif planning_problem is not None and hasattr(
         planning_problem.goal.state_list[0], "time_step"
     ):
@@ -181,6 +185,25 @@ def animate_scenario(
                 else:
                     yaw.append(0.0)
 
+        elif driven_traj is not None:
+            for state in driven_traj:
+                if hasattr(state, "velocity"):
+                    v.append(state.velocity)
+                else:
+                    v.append(0.0)
+                if hasattr(state, "time_step"):
+                    t.append(state.time_step)
+                else:
+                    t.append(0)
+                if hasattr(state, "acceleration"):
+                    a.append(state.acceleration)
+                else:
+                    a.append(0.0)
+                if hasattr(state, "orientation"):
+                    yaw.append(state.orientation)
+                else:
+                    yaw.append(0.0)
+
     # get information about the success of the solved scenario
     # there are 2 directories, one for successful scenarios and one for failed ones
     # create these directories if they do not exist yet
@@ -206,7 +229,7 @@ def animate_scenario(
 
         # axis 1 sows the marked vehicle in the lanelet network
         ax1.cla()
-        if hasattr(planning_problem.goal.state_list[0], "time_step"):
+        if planning_problem is not None and hasattr(planning_problem.goal.state_list[0], "time_step"):
             target_time_string = "Target-time: %.1f s - %.1f s" % (
                 planning_problem.goal.state_list[0].time_step.start * scenario.dt,
                 planning_problem.goal.state_list[0].time_step.end * scenario.dt,
@@ -316,90 +339,110 @@ def animate_scenario(
                             )
                         )
 
-                # velocity subplot
-                ax2.cla()
-                ax2.set(title="Velocity")
+        # Draw ego vehicle from driven trajectory (when ego not in scenario)
+        if ego_id is not None and driven_traj is not None and len(driven_traj) > 0:
+            frame_idx = min(j, len(driven_traj) - 1)
+            ego_state = driven_traj[frame_idx]
+            ego_pos = ego_state.position
+            ego_orient = ego_state.orientation if hasattr(ego_state, "orientation") else 0.0
+            veh_length = 4.5
+            veh_width = 1.8
+            import matplotlib.patches as patches
+            from matplotlib.transforms import Affine2D
+            rect = patches.Rectangle(
+                (-veh_length / 2, -veh_width / 2),
+                veh_length, veh_width,
+                linewidth=2.0, edgecolor="blue", facecolor="#2C7BB6", alpha=0.8, zorder=30,
+            )
+            transform = Affine2D().rotate(ego_orient).translate(ego_pos[0], ego_pos[1]) + ax1.transData
+            rect.set_transform(transform)
+            ax1.add_patch(rect)
 
-                ax2.set(ylabel=r"$v$ in m/s")
-                ax2.set(xlabel=r"$t$ in s")
-                # visualize the given goal velocity in the planning problem
-                if hasattr(planning_problem.goal.state_list[0], "velocity"):
-                    v_min = planning_problem.goal.state_list[0].velocity.start
-                    v_max = planning_problem.goal.state_list[0].velocity.end
-                    if hasattr(planning_problem.goal.state_list[0], "time_step"):
-                        ts_min = planning_problem.goal.state_list[0].time_step.start
-                        ts_max = planning_problem.goal.state_list[0].time_step.end
-                        ax2.plot(
-                            [ts_min, ts_max, ts_max, ts_min, ts_min],
-                            [v_min, v_min, v_max, v_max, v_min],
-                            color="g",
-                            label="goal area",
-                        )
-                    else:
-                        ax2.plot([t[0], t[-1]], [v_min, v_min], color="g")
-                        ax2.plot(
-                            [t[0], t[-1]], [v_max, v_max], color="g", label="goal area"
-                        )
-                    ax2.legend()
-                ax2.plot(t, v)
-                ax2.scatter(j, v[j])
+        if len(t) > 0:
+            # velocity subplot
+            ax2.cla()
+            ax2.set(title="Velocity")
 
-                # acceleration subplot
-                ax3.cla()
-                ax3.set(title="Acceleration")
-                ax3.set(ylabel=r"$a$ in m/s²")
-                ax3.set(xlabel=r"$t$ in s")
-                # visualize the given goal acceleration in the planning problem
-                if hasattr(planning_problem.goal.state_list[0], "acceleration"):
-                    a_min = planning_problem.goal.state_list[0].acceleration.start
-                    a_max = planning_problem.goal.state_list[0].acceleration.end
-                    if hasattr(planning_problem.goal.state_list[0], "time_step"):
-                        ts_min = planning_problem.goal.state_list[0].time_step.start
-                        ts_max = planning_problem.goal.state_list[0].time_step.end
-                        ax3.plot(
-                            [ts_min, ts_max, ts_max, ts_min, ts_min],
-                            [a_min, a_min, a_max, a_max, a_min],
-                            color="g",
-                            label="goal area",
-                        )
-                    else:
-                        ax3.plot([t[0], t[-1]], [a_min, a_min], color="g")
-                        ax3.plot(
-                            [t[0], t[-1]], [a_max, a_max], color="g", label="goal area"
-                        )
-                    ax3.legend()
-                ax3.plot(t, a)
-                ax3.scatter(j, a[j])
+            ax2.set(ylabel=r"$v$ in m/s")
+            ax2.set(xlabel=r"$t$ in s")
+            # visualize the given goal velocity in the planning problem
+            if planning_problem is not None and hasattr(planning_problem.goal.state_list[0], "velocity"):
+                v_min = planning_problem.goal.state_list[0].velocity.start
+                v_max = planning_problem.goal.state_list[0].velocity.end
+                if planning_problem is not None and hasattr(planning_problem.goal.state_list[0], "time_step"):
+                    ts_min = planning_problem.goal.state_list[0].time_step.start
+                    ts_max = planning_problem.goal.state_list[0].time_step.end
+                    ax2.plot(
+                        [ts_min, ts_max, ts_max, ts_min, ts_min],
+                        [v_min, v_min, v_max, v_max, v_min],
+                        color="g",
+                        label="goal area",
+                    )
+                else:
+                    ax2.plot([t[0], t[-1]], [v_min, v_min], color="g")
+                    ax2.plot(
+                        [t[0], t[-1]], [v_max, v_max], color="g", label="goal area"
+                    )
+                ax2.legend()
+            ax2.plot(t, v)
+            ax2.scatter(j, v[j])
 
-                # orientation subplot
-                ax4.cla()
-                ax4.set(title="Orientation")
-                ax4.set(ylabel=r"$\psi$ in rad")
-                ax4.set(xlabel=r"$t$ in s")
-                # visualize the given goal orientation in the planning problem
-                if hasattr(planning_problem.goal.state_list[0], "orientation"):
-                    yaw_min = planning_problem.goal.state_list[0].orientation.start
-                    yaw_max = planning_problem.goal.state_list[0].orientation.end
-                    if hasattr(planning_problem.goal.state_list[0], "time_step"):
-                        ts_min = planning_problem.goal.state_list[0].time_step.start
-                        ts_max = planning_problem.goal.state_list[0].time_step.end
-                        ax4.plot(
-                            [ts_min, ts_max, ts_max, ts_min, ts_min],
-                            [yaw_min, yaw_min, yaw_max, yaw_max, yaw_min],
-                            color="g",
-                            label="goal area",
-                        )
-                    else:
-                        ax4.plot([t[0], t[-1]], [yaw_min, yaw_min], color="g")
-                        ax4.plot(
-                            [t[0], t[-1]],
-                            [yaw_max, yaw_max],
-                            color="g",
-                            label="goal area",
-                        )
-                    ax4.legend()
-                ax4.plot(t, yaw)
-                ax4.scatter(j, yaw[j])
+            # acceleration subplot
+            ax3.cla()
+            ax3.set(title="Acceleration")
+            ax3.set(ylabel=r"$a$ in m/s²")
+            ax3.set(xlabel=r"$t$ in s")
+            # visualize the given goal acceleration in the planning problem
+            if planning_problem is not None and hasattr(planning_problem.goal.state_list[0], "acceleration"):
+                a_min = planning_problem.goal.state_list[0].acceleration.start
+                a_max = planning_problem.goal.state_list[0].acceleration.end
+                if planning_problem is not None and hasattr(planning_problem.goal.state_list[0], "time_step"):
+                    ts_min = planning_problem.goal.state_list[0].time_step.start
+                    ts_max = planning_problem.goal.state_list[0].time_step.end
+                    ax3.plot(
+                        [ts_min, ts_max, ts_max, ts_min, ts_min],
+                        [a_min, a_min, a_max, a_max, a_min],
+                        color="g",
+                        label="goal area",
+                    )
+                else:
+                    ax3.plot([t[0], t[-1]], [a_min, a_min], color="g")
+                    ax3.plot(
+                        [t[0], t[-1]], [a_max, a_max], color="g", label="goal area"
+                    )
+                ax3.legend()
+            ax3.plot(t, a)
+            ax3.scatter(j, a[j])
+
+            # orientation subplot
+            ax4.cla()
+            ax4.set(title="Orientation")
+            ax4.set(ylabel=r"$\psi$ in rad")
+            ax4.set(xlabel=r"$t$ in s")
+            # visualize the given goal orientation in the planning problem
+            if planning_problem is not None and hasattr(planning_problem.goal.state_list[0], "orientation"):
+                yaw_min = planning_problem.goal.state_list[0].orientation.start
+                yaw_max = planning_problem.goal.state_list[0].orientation.end
+                if planning_problem is not None and hasattr(planning_problem.goal.state_list[0], "time_step"):
+                    ts_min = planning_problem.goal.state_list[0].time_step.start
+                    ts_max = planning_problem.goal.state_list[0].time_step.end
+                    ax4.plot(
+                        [ts_min, ts_max, ts_max, ts_min, ts_min],
+                        [yaw_min, yaw_min, yaw_max, yaw_max, yaw_min],
+                        color="g",
+                        label="goal area",
+                    )
+                else:
+                    ax4.plot([t[0], t[-1]], [yaw_min, yaw_min], color="g")
+                    ax4.plot(
+                        [t[0], t[-1]],
+                        [yaw_max, yaw_max],
+                        color="g",
+                        label="goal area",
+                    )
+                ax4.legend()
+            ax4.plot(t, yaw)
+            ax4.scatter(j, yaw[j])
 
     plt.close()
     # create the figure
@@ -429,7 +472,7 @@ def animate_scenario(
         if save_animation:
             writergif = animation.PillowWriter(fps=fps_available)
             anim.save(
-                animation_directory + scenario.benchmark_id + ".gif", writer=writergif
+                animation_directory + "animation.gif", writer=writergif
             )
     return anim
 
@@ -555,9 +598,13 @@ def draw_frenet_trajectories(
         draw_uncertain_predictions(predictions, ax)
 
     # show the figure until the next one ins ready
-    # plt.savefig(str(i).zfill(4) + ".png")
+    # Save frame to file for visualization
+    save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "results",
+                            scenario.benchmark_id, "frames")
+    os.makedirs(save_dir, exist_ok=True)
+    plt.savefig(os.path.join(save_dir, f"frame_{time_step:04d}.png"), dpi=80)
+    plt.close()
     # i += 1
-    plt.pause(0.0001)
 
 def draw_bev_map(
     scenario,
@@ -705,7 +752,10 @@ def get_current_graphs(
         global_path: np.ndarray = None,
 
 ):
-    folder_path = "../../data/{scenario_name}".format(scenario_name=scenario.benchmark_id)
+    folder_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "results",
+        scenario.benchmark_id, "global_path"
+    )
     if not os.path.exists(folder_path):
         os.makedirs(folder_path)
     # drivable_area = create_figure(driven_trajectory[-1].position, animation_area)
@@ -828,7 +878,7 @@ def get_figure_array(ax: matplotlib.pyplot.Axes,
     plt.clf()
     return image_arr
 
-def show_frenet_details(vehicle_params, fp_list, global_path: np.ndarray = None):
+def show_frenet_details(vehicle_params, fp_list, global_path: np.ndarray = None, save_dir: str = None):
     """
     Plot details about the frenét trajectories.
 
@@ -836,6 +886,7 @@ def show_frenet_details(vehicle_params, fp_list, global_path: np.ndarray = None)
         vehicle_params (VehicleParameters): Parameters of the ego vehicle.
         fp_list ([FrenetTrajectory]): Considered frenét trajectories.
         global_path (np.ndarray): Global path of the planning problem. Defaults to None
+        save_dir (str): Directory to save figure. If None, shows interactive window.
     """
     # create the figure
     fig = plt.figure(constrained_layout=False, figsize=(17, 10))
@@ -850,7 +901,7 @@ def show_frenet_details(vehicle_params, fp_list, global_path: np.ndarray = None)
 
     # plot the frenét paths
     for fp in fp_list:
-        if fp.valid >= 10:
+        if fp.valid_level >= 10:
             col = "g"
         else:
             col = "r"
@@ -892,7 +943,12 @@ def show_frenet_details(vehicle_params, fp_list, global_path: np.ndarray = None)
     for fp in fp_list:
         ax4.plot(fp.t, fp.s)
 
-    plt.show()
+    if save_dir is not None:
+        os.makedirs(save_dir, exist_ok=True)
+        plt.savefig(os.path.join(save_dir, "frenet_details.png"), dpi=100)
+        plt.close(fig)
+    else:
+        plt.show()
 
 
 def draw_reach_sets(
@@ -1087,7 +1143,7 @@ def draw_scenario(
                     ax.fill(*obj.exterior.xy, "g", alpha=0.2, zorder=10)
 
     # get the target time to show it in the title
-    if hasattr(planning_problem.goal.state_list[0], "time_step"):
+    if planning_problem is not None and hasattr(planning_problem.goal.state_list[0], "time_step"):
         target_time_string = "Target-time: %.1f s - %.1f s" % (
             planning_problem.goal.state_list[0].time_step.start * scenario.dt,
             planning_problem.goal.state_list[0].time_step.end * scenario.dt,
@@ -1341,7 +1397,10 @@ def draw_global_map(
     ax.axis("off")
     plt.subplots_adjust(top=1, bottom=0, right=1, left=0, hspace=0, wspace=0)
     ax.margins(0, 0)
-    fig_path = os.path.join("../../saved_fig", scenario.benchmark_id+"lane_network.png")
+    fig_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "results",
+        scenario.benchmark_id, "lane_network.png"
+    )
     plt.savefig(fig_path, dpi=900)
     plt.clf()
 

@@ -1,0 +1,55 @@
+{
+  "evaluation_settings":{
+    "timing_enabled": true,
+    "show_visualization": false,
+    "vehicle_type": "bmw_320i"
+  },
+  "frenet_settings": {
+    "mode": "risk",
+    "frenet_parameters": {
+      "t_list": [1.9],
+      "v_list_generation_mode": "deterministic",
+      "n_v_samples": 3,
+      "d_list": {
+        "d_max_abs": 3,
+        "n": 5
+      },
+      "dt": 0.1,
+      "v_thr": 3
+    }
+  },
+  "active_learning": {
+    "active_learning_enabled": false,
+    "bev_prob_dir": {
+        "USA_Intersection-1": "/mnt/e/traj_bev/workspace/bev_v2x_transformer/BEVPredProb",
+        "CHN_Merging-1": "/mnt/e/traj_bev/workspace/bev_v2x_transformer/mergingBEVPredProb",
+        "DEU_Roundabout-1": "/mnt/e/traj_bev/workspace/bev_v2x_transformer/roundaboutBEVPredProb"
+    },
+    "bev_weight": 1.0,
+    "log_bev_prob_stats": true,
+    "resolution_mode": "linear",
+    "linear_growth_rate": 0.03,
+    "speed_band_scale": 0.02,
+    "speed_risk_factor": 0.02,
+    "bev_scenario_geometry": {
+      "USA_Intersection-1": {
+        "x_offset": 945.0,
+        "y_offset": 993.5,
+        "center_x": 1003.0,
+        "center_y": 995.0
+      },
+      "CHN_Merging-1": {
+        "x_offset": 1056.0,
+        "y_offset": 954.5,
+        "center_x": 1075.0,
+        "center_y": 955.0
+      },
+      "DEU_Roundabout-1": {
+        "x_offset": 897.0,
+        "y_offset": 1004.0,
+        "center_x": 1000.0,
+        "center_y": 992.0
+      }
+    }
+  }
+}

@@ -420,12 +420,13 @@ def collision_valid(
     # check for collision with prediction
     # if predictions are used but not collision_check_prediction, no trajectory is invalid because of collision, they only get collision probabilities
     elif mode == "WaleNet" or mode == "risk":
-        collision_detected, _ = collision_checker_prediction(
+        collision_detected, _, _ = collision_checker_prediction(
             predictions=predictions,
             scenario=scenario,
             ego_co=collision_object,
             frenet_traj=ft,
             ego_state=ego_state,
+            anchor_time=ego_state.time_step,
         )
         if collision_detected:
             return False

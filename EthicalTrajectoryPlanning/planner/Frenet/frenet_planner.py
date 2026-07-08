@@ -369,6 +369,17 @@ class FrenetPlanner(Planner):
                         planning_problem=self.planning_problem, scenario=self.scenario
                     )
 
+                # Initialize color mapping for obstacles (both modes)
+                self.obs_id_color_mapping = {}
+                i = 1
+                for obs in self.scenario.dynamic_obstacles:
+                    self.obs_id_color_mapping[obs.obstacle_id] = i
+                    i += 1
+                norm_for_obs = Normalize(vmin=0, vmax=len(self.obs_id_color_mapping)+1)
+                cmap_for_obs = plt.get_cmap("binary")
+                for obs_id, mapping_id in self.obs_id_color_mapping.items():
+                    self.obs_id_color_mapping[obs_id] = cmap_for_obs(norm_for_obs(mapping_id))
+
                 # Initialize BEV probability loader for risk overlay (both modes)
                 if not self.active_learning:
                     if settings is not None and "active_learning" in settings:
@@ -817,17 +828,7 @@ class FrenetPlanner(Planner):
                                                    )
                         plt.close('all')
 
-                    # if self.prepare_fig_data and self.time_step % int(self.store_interval / self.frenet_parameters["dt"]) == 0:
-                    #     global_path_img, hist_traj_img = get_current_graphs(scenario=self.scenario,
-                    #                                                         time_step=self.ego_state.time_step,
-                    #                                                         driven_trajectory=self.driven_traj,
-                    #                                                         ego_id=self.ego_id,
-                    #                                                         color_dict=self.obs_id_color_mapping,
-                    #                                                         animation_area=50.0,
-                    #                                                         global_path=self.global_path_to_goal,
-                    #                                                         )
-                    #     self.saved_global_path.append((global_path_img, len(self.saved_global_path)))
-                    #     self.saved_hist_traj.append((hist_traj_img, len(self.saved_hist_traj)))
+                    # Note: get_current_graphs moved to standard path for AL=false mode
                     plt.close("all")
                     # if self.prepare_label:
                     #     for i, map in enumerate(self.interaction_maps):
@@ -954,7 +955,7 @@ class FrenetPlanner(Planner):
                 predictions = None
 
         # calculate reachable sets
-        if self.responsibilpsi_radity:
+        if self.responsibility:
             with self.exec_timer.time_with_cm(
                     "simulation/calculate and check reachable sets"
             ):
@@ -1000,8 +1001,11 @@ class FrenetPlanner(Planner):
                 ft_list_valid.sort(key=lambda fp: fp.cost, reverse=False)
 
             # show details of the frenet trajectories
-            # from planner.Frenet.utils.visualization import show_frenet_details
-            # show_frenet_details(vehicle_params=self.p, fp_list=ft_list)
+            from planner.Frenet.utils.visualization import show_frenet_details
+            try:
+                show_frenet_details(vehicle_params=self.p, fp_list=ft_list, save_dir=os.path.join(os.path.dirname(__file__), "results", self.scenario.benchmark_id))
+            except Exception as e:
+                print(f"show_frenet_details failed: {e}")
 
             if self.reach_set is not None:
                 log_reach_set = self.reach_set.reach_sets[self.time_step]
@@ -1093,6 +1097,20 @@ class FrenetPlanner(Planner):
                     )
                 except Exception as e:
                     print(e)
+
+                # Draw global path and historical trajectory
+                try:
+                    global_path_img, hist_traj_img = get_current_graphs(
+                        scenario=self.scenario,
+                        time_step=self.ego_state.time_step,
+                        driven_trajectory=self.driven_traj,
+                        ego_id=self.ego_id,
+                        color_dict=self.obs_id_color_mapping,
+                        animation_area=50.0,
+                        global_path=self.global_path_to_goal,
+                    )
+                except Exception as e:
+                    print(f"get_current_graphs failed: {e}")
 
             # best trajectory
             if len(ft_list_valid) > 0:
@@ -1579,7 +1597,7 @@ if __name__ == "__main__":
         scenario_path = args.scenario
 
     # load settings from planning_fast.json
-    settings_dict = load_planning_json("planning_fast.json")
+    settings_dict = load_planning_json("planning_reactive.json")
     settings_dict["risk_dict"] = risk_dict = load_risk_json()
     if not args.time:
         settings_dict["evaluation_settings"]["show_visualization"] = True
@@ -1600,9 +1618,9 @@ if __name__ == "__main__":
         collision_report_path=eval_directory,
         timing_enabled=settings_dict["evaluation_settings"]["timing_enabled"],
         active_learning=settings_dict["active_learning"]["active_learning_enabled"],
-        prepare_num_data=settings_dict["active_learning"]["prepare_numerical_data"],
-        label_path=settings_dict["active_learning"]["label_path"] if settings_dict["active_learning"]["prepare_label"] else None,
-        fig_path=settings_dict["active_learning"]["fig_path"] if settings_dict["active_learning"]["prepare_figure_data"] else None,
+        prepare_num_data=settings_dict["active_learning"].get("prepare_numerical_data", False),
+        label_path=settings_dict["active_learning"].get("label_path") if settings_dict["active_learning"].get("prepare_label", False) else None,
+        fig_path=settings_dict["active_learning"].get("fig_path") if settings_dict["active_learning"].get("prepare_figure_data", False) else None,
     )
 
 

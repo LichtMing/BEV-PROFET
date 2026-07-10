@@ -1401,6 +1401,7 @@ def draw_global_map(
         os.path.dirname(os.path.abspath(__file__)), "..", "results",
         scenario.benchmark_id, "lane_network.png"
     )
+    os.makedirs(os.path.dirname(fig_path), exist_ok=True)
     plt.savefig(fig_path, dpi=900)
     plt.clf()
 

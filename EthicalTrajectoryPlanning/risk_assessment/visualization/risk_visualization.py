@@ -284,34 +284,41 @@ def create_partial_chart(scenario,
             data_harm = []
             data_risk = []
             data_prob = []
-            for ts in harm_dict:
-                if ts is not None:
-                    data_harm.append(ts.harm)
-                    data_risk.append(ts.risk)
-                    data_prob.append(ts.prob)
-                else:
-                    data_harm.append(0)
-                    data_risk.append(0)
-                    data_prob.append(0)
+            try:
+                for ts in harm_dict:
+                    if ts is not None:
+                        data_harm.append(ts.harm)
+                        data_risk.append(ts.risk)
+                        data_prob.append(ts.prob)
+                    else:
+                        data_harm.append(0)
+                        data_risk.append(0)
+                        data_prob.append(0)
+            except TypeError:
+                # harm_dict is a scalar (e.g. numpy float), skip visualization
+                pass
 
             # plot ego harm and ego risk for each obstacle
-            ax1.plot(data_harm, label="Obstacle " + obstacle_id)
-            ax3.plot(data_prob, label="Obstacle " + obstacle_id)
-            ax5.plot(data_risk, label="Obstacle " + obstacle_id)
+            ax1.plot(data_harm, label="Obstacle " + str(obstacle_id))
+            ax3.plot(data_prob, label="Obstacle " + str(obstacle_id))
+            ax5.plot(data_risk, label="Obstacle " + str(obstacle_id))
 
             # create string with ego data for harm evaluation of next
             # time step
-            if ego_vehicle_data == "":
-                ego_vehicle_data += "Mass: " + str(harm_dict[0].mass) + \
-                    "\nVelocity: " + str(harm_dict[0].velocity) + \
-                    "\nYaw: " + str(harm_dict[0].yaw) + \
-                    "\nSize: " + str(harm_dict[0].size) + \
-                    "\nHarm: " + str(harm_dict[0].harm) + \
-                    "\nRisk: " + str(harm_dict[0].risk) + "\n\n"
-            else:
-                ego_vehicle_data += "Harm: " + str(harm_dict[0].harm) + \
-                                    "\nRisk: " + str(harm_dict[0].risk) + \
-                                    "\n\n"
+            try:
+                if ego_vehicle_data == "":
+                    ego_vehicle_data += "Mass: " + str(harm_dict[0].mass) + \
+                        "\nVelocity: " + str(harm_dict[0].velocity) + \
+                        "\nYaw: " + str(harm_dict[0].yaw) + \
+                        "\nSize: " + str(harm_dict[0].size) + \
+                        "\nHarm: " + str(harm_dict[0].harm) + \
+                        "\nRisk: " + str(harm_dict[0].risk) + "\n\n"
+                else:
+                    ego_vehicle_data += "Harm: " + str(harm_dict[0].harm) + \
+                                        "\nRisk: " + str(harm_dict[0].risk) + \
+                                        "\n\n"
+            except (TypeError, IndexError):
+                pass
 
         # add description of ego harm plot
         ax1.legend(loc='upper right')
@@ -336,31 +343,38 @@ def create_partial_chart(scenario,
             data_harm = []
             data_risk = []
             data_prob = []
-            for ts in harm_dict:
-                if ts is not None:
-                    data_harm.append(ts.harm)
-                    data_risk.append(ts.risk)
-                    data_prob.append(ts.prob)
-                else:
-                    data_harm.append(0)
-                    data_risk.append(0)
-                    data_prob.append(0)
+            try:
+                for ts in harm_dict:
+                    if ts is not None:
+                        data_harm.append(ts.harm)
+                        data_risk.append(ts.risk)
+                        data_prob.append(ts.prob)
+                    else:
+                        data_harm.append(0)
+                        data_risk.append(0)
+                        data_prob.append(0)
+            except TypeError:
+                # harm_dict is a scalar (e.g. numpy float), skip visualization
+                pass
 
             # plot harm and risk for each obstacle for collisions with
             # the ego vehicle
-            ax2.plot(data_harm, label="Obstacle " + obstacle_id)
-            ax4.plot(data_prob, label="Obstacle " + obstacle_id)
-            ax6.plot(data_risk, label="Obstacle " + obstacle_id)
+            ax2.plot(data_harm, label="Obstacle " + str(obstacle_id))
+            ax4.plot(data_prob, label="Obstacle " + str(obstacle_id))
+            ax6.plot(data_risk, label="Obstacle " + str(obstacle_id))
 
             # create string with obstacle data for harm evaluation of next
             # time step
-            obst_vehicle_data += str(harm_dict[0].type) + ", Mass: " + \
-                str(harm_dict[0].mass) + "\nVelocity: " + \
-                str(harm_dict[0].velocity) + "\nYaw: " + \
-                str(harm_dict[0].yaw) + "\nSize: " + \
-                str(harm_dict[0].size) + "\nHarm: " + \
-                str(harm_dict[0].harm) + "\nRisk: " + \
-                str(harm_dict[0].risk) + "\n\n"
+            try:
+                obst_vehicle_data += str(harm_dict[0].type) + ", Mass: " + \
+                    str(harm_dict[0].mass) + "\nVelocity: " + \
+                    str(harm_dict[0].velocity) + "\nYaw: " + \
+                    str(harm_dict[0].yaw) + "\nSize: " + \
+                    str(harm_dict[0].size) + "\nHarm: " + \
+                    str(harm_dict[0].harm) + "\nRisk: " + \
+                    str(harm_dict[0].risk) + "\n\n"
+            except (TypeError, IndexError):
+                pass
 
         # add description of obstacle harm plot
         ax2.legend(loc='upper right')

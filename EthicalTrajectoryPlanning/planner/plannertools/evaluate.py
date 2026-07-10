@@ -1,4 +1,5 @@
 """This module provides parent classes for easy evaluation of a planner."""
+import os
 import sys
 import pathlib
 import random
@@ -74,8 +75,37 @@ class ScenarioEvaluator(ScenarioHandler):
                     print(f"Stopping Evaluation, results not valid anymore due to simulation time out in {scenario_path}")
                     sys.exit()
 
-            # TODO implement saving and animating scenario
-            # self.postprocess()
+            # Animate scenario after simulation
+            try:
+                from planner.Frenet.utils.visualization import animate_scenario
+                scenario_name = self.scenario.benchmark_id
+                anim_dir = os.path.join(
+                    os.path.dirname(os.path.abspath(__file__)),
+                    "..", "Frenet", "results", scenario_name
+                ) + "/"
+                os.makedirs(anim_dir, exist_ok=True)
+                # Collect ego data for animation
+                pp = (
+                    list(self.planning_problem_set.planning_problem_dict.values())[0]
+                    if self.planning_problem_set and self.planning_problem_set.planning_problem_dict
+                    else None
+                )
+                ego_id = list(self.planning_problem_set.planning_problem_dict.keys())[0] if pp else None
+                driven_traj = self.agent_list[0].planner.driven_traj if self.agent_list and hasattr(self.agent_list[0].planner, 'driven_traj') else None
+                print(f"[animate] generating animation to {anim_dir} (ego_id={ego_id}, driven_traj={len(driven_traj) if driven_traj else 0} states)...")
+                animate_scenario(
+                    scenario=self.scenario,
+                    marked_vehicles=None,
+                    planning_problem=pp,
+                    save_animation=True,
+                    animation_directory=anim_dir,
+                    ego_id=ego_id,
+                    driven_traj=driven_traj,
+                )
+                print(f"[animate] done. Files in {anim_dir}: {os.listdir(anim_dir)}")
+            except Exception as e:
+                print(f"animate_scenario failed: {e}")
+                traceback.print_exc()
         return_dict["scenario_path"] = scenario_path
         return_dict["exec_time"] = time.time() - start_time
         return_dict["harm"] = self.harm

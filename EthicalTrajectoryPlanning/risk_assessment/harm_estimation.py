@@ -245,8 +245,8 @@ def get_harm(scenario, traj, predictions, ego_id, vehicle_params, modes, coeffs,
             predictions[obstacle_id]['shape']['length']
             * predictions[obstacle_id]['shape']['width']
         )
-        pred_v = np.array(predictions[obstacle_id]['v_list'], dtype=np.float)
-        pred_yaw = np.array(predictions[obstacle_id]['orientation_list'], dtype=np.float)
+        pred_v = np.array(predictions[obstacle_id]['v_list'], dtype=float)
+        pred_yaw = np.array(predictions[obstacle_id]['orientation_list'], dtype=float)
 
         # lists to save ego and obstacle harm as well as ego and obstacle risk
         # one list per obstacle

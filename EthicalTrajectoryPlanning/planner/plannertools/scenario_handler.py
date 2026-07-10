@@ -177,9 +177,9 @@ class ScenarioHandler:
                 traj_length = self.agent_list[0].planner.traj_length
                 self.traverse_future_steps = traj_length * 3
             self.search_traj_logger = TrajLogger(log_prefix="scenario search tree traj logger", points_num=traj_length * 3,
-                                                  save_dir=os.path.join("saved_fig", self.scenario.benchmark_id))
+                                                  save_dir=os.path.join("../../saved_fig", self.scenario.benchmark_id))
             self.ground_truth_traj_logger = TrajLogger(log_prefix="scenario ground truth traj logger", points_num=traj_length * 3,
-                                                       save_dir=os.path.join("saved_fig", self.scenario.benchmark_id))
+                                                       save_dir=os.path.join("../../saved_fig", self.scenario.benchmark_id))
             for dynamic_obstacle in self.scenario.dynamic_obstacles:
                 for s in dynamic_obstacle.prediction.trajectory.state_list:
                     if (
@@ -276,7 +276,7 @@ class ScenarioHandler:
         if self.fig_path is not None:
             fig_count = 0
 
-        # draw_global_map(self.scenario)
+        draw_global_map(self.scenario)
         for time_step in range(max_simulation_time_steps):
             for agent in self.agent_list:
                 # Also pass in timestep because it is needed in the recorder

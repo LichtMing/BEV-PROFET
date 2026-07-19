@@ -33,7 +33,8 @@ from commonroad.scenario.trajectory import State, Trajectory
 
 # ── constants ──────────────────────────────────────────────────────────
 DT = 0.1                     # time step [s]
-TOTAL_STEPS = 80             # 8 seconds — enough to reach the far goal
+TOTAL_STEPS = 160            # 16 seconds — must cover max_simulation_time_steps
+                               # (goal.time_step.end * 2 = 160)
 INITIAL_SPEED = 20.0         # m/s  (~72 km/h)
 BRAKE_DECEL = -6.0           # m/s²  emergency braking
 CAR_LENGTH = 4.5             # m
@@ -308,7 +309,7 @@ def create_ego_planning_problem(
             goal_heading - 0.3, goal_heading + 0.3,
         ),
         velocity=Interval(10.0, 30.0),
-        time_step=Interval(0, TOTAL_STEPS),
+        time_step=Interval(0, TOTAL_STEPS // 2),  # simulation = end * 2 = TOTAL_STEPS
     )
     goal_region = GoalRegion([goal_state])
 

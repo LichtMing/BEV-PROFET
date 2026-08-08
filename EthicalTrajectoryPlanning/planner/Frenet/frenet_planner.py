@@ -143,7 +143,7 @@ class FrenetPlanner(Planner):
             mode (Str): Mode of the frenét planner.
             timing (bool): True if the execution times should be saved. Defaults to False.
             frenet_parameters (dict): Parameters for the frenét planner. Defaults to None.
-            sensor_radius (float): Radius of the sensor model. Defaults to 30.0.
+            sensor_radius (float): Radius of the sensor model. Defaults to 50.0.
             plot_frenet_trajectories (bool): True if the frenét paths should be visualized. Defaults to False.
             weights(dict): the weights of the costfunction. Defaults to None.
         """
@@ -292,6 +292,9 @@ class FrenetPlanner(Planner):
                 # get sensor radius param, and planner mode
                 self.sensor_radius = sensor_radius
                 self.mode = mode
+                self.visualization_settings = (
+                    settings.get("visualization_settings", {}) if settings else {}
+                )
 
                 # get visualization marker
                 self.plot_frenet_trajectories = plot_frenet_trajectories
@@ -1081,6 +1084,21 @@ class FrenetPlanner(Planner):
                 print("")
 
                 try:
+                    plot_visible_area = visible_area
+                    if self.visualization_settings.get(
+                        "plot_geometric_visibility", False
+                    ):
+                        _, plot_visible_area = get_visible_objects(
+                            scenario=self.scenario,
+                            ego_pos=self.ego_state.position,
+                            time_step=self.time_step,
+                            sensor_radius=float(
+                                self.visualization_settings.get(
+                                    "geometric_visibility_radius", self.sensor_radius
+                                )
+                            ),
+                        )
+
                     draw_frenet_trajectories(
                         scenario=self.scenario,
                         time_step=self.ego_state.time_step,
@@ -1092,8 +1110,14 @@ class FrenetPlanner(Planner):
                         global_path_after_goal=self.global_path_after_goal,
                         driven_traj=self.driven_traj,
                         animation_area=50.0,
-                        predictions=predictions,
-                        visible_area=visible_area,
+                        predictions=(
+                            predictions
+                            if self.visualization_settings.get(
+                                "plot_prediction_overlays", True
+                            )
+                            else None
+                        ),
+                        visible_area=plot_visible_area,
                     )
                 except Exception as e:
                     print(e)

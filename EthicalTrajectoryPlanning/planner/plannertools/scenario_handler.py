@@ -270,6 +270,13 @@ class ScenarioHandler:
             )
             # run the simulation not longer to avoid simulating forever
             max_simulation_time_steps = int(max_time_steps) if self.active_learning else int(max_time_steps * 2.0)
+            configured_max_steps = self.planner_creator.settings[
+                "evaluation_settings"
+            ].get("max_simulation_time_steps")
+            if configured_max_steps is not None:
+                max_simulation_time_steps = min(
+                    max_simulation_time_steps, int(configured_max_steps)
+                )
 
         if self.label_path is not None:
             label_count = 0
@@ -428,6 +435,22 @@ class ScenarioHandler:
 
         if not self.collision_checker.collide(current_state_collision_object):
             return
+
+        # Preserve the impact state for the post-run GIF and frame export.
+        # Collision checking happens before the planner step, so without this
+        # append the animation would otherwise end one frame before contact.
+        if hasattr(agent.planner, "driven_traj"):
+            driven_traj = agent.planner.driven_traj
+            if not driven_traj or driven_traj[-1].time_step < time_step:
+                driven_traj.append(
+                    State(
+                        position=ego_pos,
+                        orientation=ego_yaw,
+                        time_step=time_step,
+                        velocity=ego_vel,
+                        acceleration=0.0,
+                    )
+                )
 
         # get the colliding obstacle
         obs_id = None

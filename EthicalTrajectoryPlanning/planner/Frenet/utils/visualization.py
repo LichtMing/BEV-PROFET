@@ -365,25 +365,6 @@ def animate_scenario(
 
             ax2.set(ylabel=r"$v$ in m/s")
             ax2.set(xlabel=r"$t$ in s")
-            # visualize the given goal velocity in the planning problem
-            if planning_problem is not None and hasattr(planning_problem.goal.state_list[0], "velocity"):
-                v_min = planning_problem.goal.state_list[0].velocity.start
-                v_max = planning_problem.goal.state_list[0].velocity.end
-                if planning_problem is not None and hasattr(planning_problem.goal.state_list[0], "time_step"):
-                    ts_min = planning_problem.goal.state_list[0].time_step.start
-                    ts_max = planning_problem.goal.state_list[0].time_step.end
-                    ax2.plot(
-                        [ts_min, ts_max, ts_max, ts_min, ts_min],
-                        [v_min, v_min, v_max, v_max, v_min],
-                        color="g",
-                        label="goal area",
-                    )
-                else:
-                    ax2.plot([t[0], t[-1]], [v_min, v_min], color="g")
-                    ax2.plot(
-                        [t[0], t[-1]], [v_max, v_max], color="g", label="goal area"
-                    )
-                ax2.legend()
             ax2.plot(t, v)
             ax2.scatter(j, v[j])
 
@@ -419,28 +400,6 @@ def animate_scenario(
             ax4.set(title="Orientation")
             ax4.set(ylabel=r"$\psi$ in rad")
             ax4.set(xlabel=r"$t$ in s")
-            # visualize the given goal orientation in the planning problem
-            if planning_problem is not None and hasattr(planning_problem.goal.state_list[0], "orientation"):
-                yaw_min = planning_problem.goal.state_list[0].orientation.start
-                yaw_max = planning_problem.goal.state_list[0].orientation.end
-                if planning_problem is not None and hasattr(planning_problem.goal.state_list[0], "time_step"):
-                    ts_min = planning_problem.goal.state_list[0].time_step.start
-                    ts_max = planning_problem.goal.state_list[0].time_step.end
-                    ax4.plot(
-                        [ts_min, ts_max, ts_max, ts_min, ts_min],
-                        [yaw_min, yaw_min, yaw_max, yaw_max, yaw_min],
-                        color="g",
-                        label="goal area",
-                    )
-                else:
-                    ax4.plot([t[0], t[-1]], [yaw_min, yaw_min], color="g")
-                    ax4.plot(
-                        [t[0], t[-1]],
-                        [yaw_max, yaw_max],
-                        color="g",
-                        label="goal area",
-                    )
-                ax4.legend()
             ax4.plot(t, yaw)
             ax4.scatter(j, yaw[j])
 
@@ -1138,7 +1097,12 @@ def draw_scenario(
         elif visible_area.geom_type == "Polygon":
             ax.fill(*visible_area.exterior.xy, "g", alpha=0.2, zorder=10)
         else:
-            for obj in visible_area:
+            geometries = (
+                visible_area.geoms
+                if hasattr(visible_area, "geoms")
+                else visible_area
+            )
+            for obj in geometries:
                 if obj.geom_type == "Polygon":
                     ax.fill(*obj.exterior.xy, "g", alpha=0.2, zorder=10)
 

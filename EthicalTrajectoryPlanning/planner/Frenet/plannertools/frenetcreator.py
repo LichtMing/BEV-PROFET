@@ -39,6 +39,7 @@ class FrenetCreator(PlannerCreator):
             vehicle_params=scenario_handler.vehicle_params,
             exec_timer=scenario_handler.exec_timer,
             mode=self.frenet_settings["mode"],
+            sensor_radius=self.frenet_settings.get("sensor_radius", 50.0),
             plot_frenet_trajectories=self.show_visualization,
             frenet_parameters=self.frenet_settings["frenet_parameters"],
             active_learning=scenario_handler.active_learning,

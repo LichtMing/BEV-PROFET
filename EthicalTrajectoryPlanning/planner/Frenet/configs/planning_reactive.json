@@ -2,10 +2,12 @@
   "evaluation_settings":{
     "timing_enabled": true,
     "show_visualization": false,
+    "max_simulation_time_steps": 101,
     "vehicle_type": "bmw_320i"
   },
   "frenet_settings": {
-    "mode": "risk",
+    "mode": "ground_truth",
+    "sensor_radius": 500.0,
     "frenet_parameters": {
       "t_list": [1.9],
       "v_list_generation_mode": "deterministic",
@@ -17,6 +19,11 @@
       "dt": 0.1,
       "v_thr": 3
     }
+  },
+  "visualization_settings": {
+    "plot_prediction_overlays": false,
+    "plot_geometric_visibility": true,
+    "geometric_visibility_radius": 30.0
   },
   "active_learning": {
     "active_learning_enabled": false,

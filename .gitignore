@@ -1,6 +1,9 @@
 __pycache__/
 .github/
 .claude/
+.agents/
+.codex/
+.vscode/
 bev_v2x_transformer/BEVData_01/
 bev_v2x_transformer/BEVImgLabel_01/
 bev_v2x_transformer/BEVImgData_01/
@@ -16,7 +19,6 @@ bev_v2x_transformer/roundaboutBEVPredProb/
 bev_v2x_transformer/roundaboutBEVPredProb_vision/
 bev_v2x_transformer/BEVPredProb_vision/
 
-
 scenario_vis/
 scenarios/
 saved_fig/
@@ -31,6 +33,7 @@ build/
 console_log/
 fig_for_diagram/
 saved_fig/
+AGENTS.md
 
 *.mp4
 *.png
@@ -40,26 +43,19 @@ saved_fig/
 *.log
 *.pth
 out/
-
+tmp*
 planner/GlobalPath/results/
-
 planner/Frenet/results*
-
 planner/Frenet/planner/log/
-
 planner/log/
-
 planner/results/
-
 planner/plannertools/Frenet/results
 
-tmp*
 
-
-EthicalTrajectoryPlanning/planner/Frenet/batch_logs
-
-
-
-
+EthicalTrajectoryPlanning/planner/Frenet/batch_logs/
+EthicalTrajectoryPlanning/saved_fig/
+EthicalTrajectoryPlanning/planner/Frenet/results/
+EthicalTrajectoryPlanning/planner/Frenet/ZAM_Tutorial-1_2_T-1.xml
 dataset_convert/INTERACTION-Dataset-DR-v1_1
+paper and comments/
 
